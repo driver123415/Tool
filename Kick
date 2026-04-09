@@ -1,0 +1,5 @@
+-- Tunggu 3 detik sebelum script dieksekusi agar kamu siap
+task.wait(3)
+
+-- Memunculkan pesan kick/error prompt
+game:GetService("Players").LocalPlayer:Kick("Ini adalah simulasi Kick untuk menguji script Anti-DC.")
