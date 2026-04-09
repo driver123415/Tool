@@ -1,5 +1,5 @@
 -- ==========================================
--- SERVER MANAGER & HOPPER GUI V2
+-- SERVER MANAGER & HOPPER GUI V2 (FINAL + BUG FIX)
 -- ==========================================
 local Players = game:GetService("Players")
 local CoreGui = game:GetService("CoreGui")
@@ -26,7 +26,7 @@ ScreenGui.ResetOnSpawn = false
 ScreenGui.Parent = parentGui
 
 local MainFrame = Instance.new("Frame")
-MainFrame.Size = UDim2.new(0, 320, 0, 470) -- Diperpanjang untuk memuat tombol baru
+MainFrame.Size = UDim2.new(0, 320, 0, 470)
 MainFrame.Position = UDim2.new(0.5, -160, 0.5, -235)
 MainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
 MainFrame.BorderSizePixel = 0
@@ -281,6 +281,13 @@ if type(AllIDs) ~= "table" or AllIDs[1] ~= actualHour then
 	pcall(function() writefile("NotSameServers.json", HttpService:JSONEncode(AllIDs)) end)
 end
 
+-- Menangkap error jika teleportasi dibatalkan oleh Roblox (misal: server penuh/error)
+TeleportService.TeleportInitFailed:Connect(function(player, teleportResult, errorMessage)
+	StatusLabel.Text = "Status: Teleport gagal (" .. teleportResult.Name .. ")"
+	HopLowestBtn.Text = "Find & Join Lowest Server"
+	HopHighestBtn.Text = "Find & Join Highest Server"
+end)
+
 local function HopServer(sortOrder, btnToUpdate, statusText, cursorToUse)
 	if btnToUpdate.Text == "Searching..." then return end 
 	btnToUpdate.Text = "Searching..."
@@ -331,7 +338,7 @@ local function HopServer(sortOrder, btnToUpdate, statusText, cursorToUse)
 			end
 		end
 
-		-- Jika server ditemukan, teleport. Jika tidak, simpan cursor dan minta user klik lagi.
+		-- Jika server ditemukan, teleport.
 		if targetServerID then
 			StatusLabel.Text = "Status: Server ditemukan! Teleporting..."
 			table.insert(AllIDs, targetServerID)
@@ -340,6 +347,15 @@ local function HopServer(sortOrder, btnToUpdate, statusText, cursorToUse)
 			end)
 			
 			TeleportService:TeleportToPlaceInstance(PlaceID, targetServerID, player)
+			
+			-- FIX BUG: Tambahkan fallback reset jika teleport nyangkut/gagal setelah 6 detik
+			task.delay(6, function()
+				if btnToUpdate.Text == "Searching..." then
+					StatusLabel.Text = "Status: Teleport delay/penuh. Coba lagi."
+					btnToUpdate.Text = (sortOrder == "Asc") and "Find & Join Lowest Server" or "Find & Join Highest Server"
+				end
+			end)
+			
 		else
 			StatusLabel.Text = "Status: Habis di halaman ini. Klik lagi."
 			btnToUpdate.Text = (sortOrder == "Asc") and "Find & Join Lowest Server" or "Find & Join Highest Server"
