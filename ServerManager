@@ -1,5 +1,5 @@
 -- ==========================================
--- SERVER MANAGER & HOPPER GUI
+-- SERVER MANAGER & HOPPER GUI V2
 -- ==========================================
 local Players = game:GetService("Players")
 local CoreGui = game:GetService("CoreGui")
@@ -26,8 +26,8 @@ ScreenGui.ResetOnSpawn = false
 ScreenGui.Parent = parentGui
 
 local MainFrame = Instance.new("Frame")
-MainFrame.Size = UDim2.new(0, 320, 0, 420)
-MainFrame.Position = UDim2.new(0.5, -160, 0.5, -210)
+MainFrame.Size = UDim2.new(0, 320, 0, 470) -- Diperpanjang untuk memuat tombol baru
+MainFrame.Position = UDim2.new(0.5, -160, 0.5, -235)
 MainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
 MainFrame.BorderSizePixel = 0
 MainFrame.ClipsDescendants = true
@@ -56,7 +56,7 @@ local Title = Instance.new("TextLabel")
 Title.Size = UDim2.new(1, -70, 1, 0)
 Title.Position = UDim2.new(0, 10, 0, 0)
 Title.BackgroundTransparency = 1
-Title.Text = "Server Manager V1"
+Title.Text = "Server Manager V2"
 Title.TextColor3 = Color3.fromRGB(255, 255, 255)
 Title.Font = Enum.Font.GothamBold
 Title.TextSize = 14
@@ -162,7 +162,7 @@ Divider1.Parent = ContentFrame
 createLabel("Join Specific Server", UDim2.new(0, 10, 0, 125), ContentFrame)
 
 local InputGameID = createTextBox("Target Game ID", UDim2.new(1, -20, 0, 30), UDim2.new(0, 10, 0, 145), ContentFrame)
-InputGameID.Text = tostring(game.PlaceId) -- Auto fill dengan game saat ini
+InputGameID.Text = tostring(game.PlaceId)
 
 local InputJobID = createTextBox("Paste Target Job ID here...", UDim2.new(1, -20, 0, 30), UDim2.new(0, 10, 0, 180), ContentFrame)
 
@@ -173,12 +173,13 @@ local Divider2 = Divider1:Clone()
 Divider2.Position = UDim2.new(0, 10, 0, 260)
 Divider2.Parent = ContentFrame
 
--- --- BAGIAN 3: LOWEST SERVER HOPPER ---
+-- --- BAGIAN 3: SERVER HOPPER ---
 createLabel("Server Hopper", UDim2.new(0, 10, 0, 270), ContentFrame)
 
-local HopLowestBtn = createBtn("Find & Join Lowest Server", UDim2.new(1, -20, 0, 40), UDim2.new(0, 10, 0, 290), Color3.fromRGB(200, 100, 0), ContentFrame)
+local HopLowestBtn = createBtn("Find & Join Lowest Server", UDim2.new(1, -20, 0, 35), UDim2.new(0, 10, 0, 290), Color3.fromRGB(200, 100, 0), ContentFrame)
+local HopHighestBtn = createBtn("Find & Join Highest Server", UDim2.new(1, -20, 0, 35), UDim2.new(0, 10, 0, 335), Color3.fromRGB(0, 150, 50), ContentFrame)
 
-local StatusLabel = createLabel("Status: Idle", UDim2.new(0, 10, 0, 335), ContentFrame)
+local StatusLabel = createLabel("Status: Idle", UDim2.new(0, 10, 0, 385), ContentFrame)
 StatusLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
 StatusLabel.TextXAlignment = Enum.TextXAlignment.Center
 
@@ -218,7 +219,7 @@ MinButton.MouseButton1Click:Connect(function()
 		MainFrame:TweenSize(UDim2.new(0, 320, 0, 30), "Out", "Quad", 0.3, true)
 		ContentFrame.Visible = false
 	else
-		MainFrame:TweenSize(UDim2.new(0, 320, 0, 420), "Out", "Quad", 0.3, true)
+		MainFrame:TweenSize(UDim2.new(0, 320, 0, 470), "Out", "Quad", 0.3, true)
 		ContentFrame.Visible = true
 	end
 end)
@@ -239,15 +240,11 @@ end
 -- LOGIKA BUTTONS (COPY & TELEPORT)
 -- ==========================================
 CopyGameIdBtn.MouseButton1Click:Connect(function()
-	if pcall(function() setclipboard(tostring(game.PlaceId)) end) then 
-        flashButton(CopyGameIdBtn, "Copied!") 
-    end
+	if pcall(function() setclipboard(tostring(game.PlaceId)) end) then flashButton(CopyGameIdBtn, "Copied!") end
 end)
 
 CopyJobIdBtn.MouseButton1Click:Connect(function()
-	if pcall(function() setclipboard(tostring(game.JobId)) end) then 
-        flashButton(CopyJobIdBtn, "Copied!") 
-    end
+	if pcall(function() setclipboard(tostring(game.JobId)) end) then flashButton(CopyJobIdBtn, "Copied!") end
 end)
 
 JoinSpecificBtn.MouseButton1Click:Connect(function()
@@ -268,10 +265,11 @@ JoinSpecificBtn.MouseButton1Click:Connect(function()
 end)
 
 -- ==========================================
--- LOGIKA LOWEST SERVER HOPPER
+-- LOGIKA SERVER HOPPER (LOWEST & HIGHEST)
 -- ==========================================
 local AllIDs = {}
-local foundAnything = ""
+local cursorLowest = ""
+local cursorHighest = ""
 local actualHour = os.date("!*t").hour
 
 -- Load log server lama
@@ -283,21 +281,20 @@ if type(AllIDs) ~= "table" or AllIDs[1] ~= actualHour then
 	pcall(function() writefile("NotSameServers.json", HttpService:JSONEncode(AllIDs)) end)
 end
 
-HopLowestBtn.MouseButton1Click:Connect(function()
-	if HopLowestBtn.Text == "Searching..." then return end -- Cegah spam klik
-	HopLowestBtn.Text = "Searching..."
-	StatusLabel.Text = "Status: Mencari server sepi..."
+local function HopServer(sortOrder, btnToUpdate, statusText, cursorToUse)
+	if btnToUpdate.Text == "Searching..." then return end 
+	btnToUpdate.Text = "Searching..."
+	StatusLabel.Text = statusText
 	
 	table.insert(AllIDs, game.JobId) -- Blacklist server saat ini
 
 	local PlaceID = game.PlaceId
-	local apiURL = 'https://games.roblox.com/v1/games/' .. PlaceID .. '/servers/Public?sortOrder=Asc&limit=100'
+	local apiURL = 'https://games.roblox.com/v1/games/' .. PlaceID .. '/servers/Public?sortOrder=' .. sortOrder .. '&limit=100'
 	
-	if foundAnything ~= "" then
-		apiURL = apiURL .. '&cursor=' .. foundAnything
+	if cursorToUse ~= "" then
+		apiURL = apiURL .. '&cursor=' .. cursorToUse
 	end
 
-	-- Menjalankan pencarian di thread terpisah agar GUI tidak freeze
 	task.spawn(function()
 		local success, result = pcall(function()
 			return HttpService:JSONDecode(game:HttpGet(apiURL))
@@ -305,21 +302,19 @@ HopLowestBtn.MouseButton1Click:Connect(function()
 
 		if not success then
 			StatusLabel.Text = "Status: Gagal mengambil data API."
-			HopLowestBtn.Text = "Find & Join Lowest Server"
+			btnToUpdate.Text = (sortOrder == "Asc") and "Find & Join Lowest Server" or "Find & Join Highest Server"
 			return
 		end
 
 		local Site = result
-		if Site.nextPageCursor and Site.nextPageCursor ~= "null" then
-			foundAnything = Site.nextPageCursor
-		end
+		local nextCursor = (Site.nextPageCursor and Site.nextPageCursor ~= "null") and Site.nextPageCursor or ""
 
 		local targetServerID = nil
 
 		for _, v in pairs(Site.data) do
 			local ID = tostring(v.id)
 			
-			-- Filter server sepi tapi tidak penuh, tidak ada ping error, dan bukan server saat ini
+			-- Syarat: Pemain kurang dari max, ada ping, bukan server ini
 			if v.playing < v.maxPlayers and v.ping and ID ~= game.JobId then
 				local isBlacklisted = false
 				for _, Existing in pairs(AllIDs) do
@@ -336,6 +331,7 @@ HopLowestBtn.MouseButton1Click:Connect(function()
 			end
 		end
 
+		-- Jika server ditemukan, teleport. Jika tidak, simpan cursor dan minta user klik lagi.
 		if targetServerID then
 			StatusLabel.Text = "Status: Server ditemukan! Teleporting..."
 			table.insert(AllIDs, targetServerID)
@@ -345,8 +341,24 @@ HopLowestBtn.MouseButton1Click:Connect(function()
 			
 			TeleportService:TeleportToPlaceInstance(PlaceID, targetServerID, player)
 		else
-			StatusLabel.Text = "Status: Tidak ada server baru. Klik lagi."
-			HopLowestBtn.Text = "Find & Join Lowest Server"
+			StatusLabel.Text = "Status: Habis di halaman ini. Klik lagi."
+			btnToUpdate.Text = (sortOrder == "Asc") and "Find & Join Lowest Server" or "Find & Join Highest Server"
+			
+			-- Update cursor global berdasarkan jenis pencarian
+			if sortOrder == "Asc" then
+				cursorLowest = nextCursor
+			else
+				cursorHighest = nextCursor
+			end
 		end
 	end)
+end
+
+-- Koneksi Tombol
+HopLowestBtn.MouseButton1Click:Connect(function()
+	HopServer("Asc", HopLowestBtn, "Status: Mencari server paling sepi...", cursorLowest)
+end)
+
+HopHighestBtn.MouseButton1Click:Connect(function()
+	HopServer("Desc", HopHighestBtn, "Status: Mencari server paling ramai...", cursorHighest)
 end)
