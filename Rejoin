@@ -1,0 +1,352 @@
+-- ==========================================
+-- SERVER MANAGER & HOPPER GUI
+-- ==========================================
+local Players = game:GetService("Players")
+local CoreGui = game:GetService("CoreGui")
+local UserInputService = game:GetService("UserInputService")
+local HttpService = game:GetService("HttpService")
+local TeleportService = game:GetService("TeleportService")
+
+local player = Players.LocalPlayer
+
+-- Menggunakan CoreGui agar aman dari deteksi game, fallback ke PlayerGui
+local parentGui = pcall(function() return CoreGui.Name end) and CoreGui or player:WaitForChild("PlayerGui")
+
+-- Hapus GUI lama jika sudah ada
+if parentGui:FindFirstChild("ServerManagerGUI") then
+	parentGui.ServerManagerGUI:Destroy()
+end
+
+-- ==========================================
+-- MEMBUAT UI ELEMENTS
+-- ==========================================
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "ServerManagerGUI"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.Parent = parentGui
+
+local MainFrame = Instance.new("Frame")
+MainFrame.Size = UDim2.new(0, 320, 0, 420)
+MainFrame.Position = UDim2.new(0.5, -160, 0.5, -210)
+MainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+MainFrame.BorderSizePixel = 0
+MainFrame.ClipsDescendants = true
+MainFrame.Parent = ScreenGui
+
+local UICorner = Instance.new("UICorner")
+UICorner.CornerRadius = UDim.new(0, 8)
+UICorner.Parent = MainFrame
+
+-- TOP BAR (Untuk Dragging)
+local TopBar = Instance.new("Frame")
+TopBar.Size = UDim2.new(1, 0, 0, 30)
+TopBar.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+TopBar.BorderSizePixel = 0
+TopBar.Parent = MainFrame
+Instance.new("UICorner", TopBar).CornerRadius = UDim.new(0, 8)
+
+local TopBarHider = Instance.new("Frame")
+TopBarHider.Size = UDim2.new(1, 0, 0, 10)
+TopBarHider.Position = UDim2.new(0, 0, 1, -10)
+TopBarHider.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+TopBarHider.BorderSizePixel = 0
+TopBarHider.Parent = TopBar
+
+local Title = Instance.new("TextLabel")
+Title.Size = UDim2.new(1, -70, 1, 0)
+Title.Position = UDim2.new(0, 10, 0, 0)
+Title.BackgroundTransparency = 1
+Title.Text = "Server Manager V1"
+Title.TextColor3 = Color3.fromRGB(255, 255, 255)
+Title.Font = Enum.Font.GothamBold
+Title.TextSize = 14
+Title.TextXAlignment = Enum.TextXAlignment.Left
+Title.Parent = TopBar
+
+-- TOMBOL MINIMIZE & CLOSE
+local MinButton = Instance.new("TextButton")
+MinButton.Size = UDim2.new(0, 30, 0, 30)
+MinButton.Position = UDim2.new(1, -60, 0, 0)
+MinButton.BackgroundTransparency = 1
+MinButton.Text = "-"
+MinButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+MinButton.Font = Enum.Font.GothamBold
+MinButton.TextSize = 18
+MinButton.Parent = TopBar
+
+local CloseButton = Instance.new("TextButton")
+CloseButton.Size = UDim2.new(0, 30, 0, 30)
+CloseButton.Position = UDim2.new(1, -30, 0, 0)
+CloseButton.BackgroundTransparency = 1
+CloseButton.Text = "X"
+CloseButton.TextColor3 = Color3.fromRGB(255, 50, 50)
+CloseButton.Font = Enum.Font.GothamBold
+CloseButton.TextSize = 14
+CloseButton.Parent = TopBar
+
+local ContentFrame = Instance.new("Frame")
+ContentFrame.Size = UDim2.new(1, 0, 1, -30)
+ContentFrame.Position = UDim2.new(0, 0, 0, 30)
+ContentFrame.BackgroundTransparency = 1
+ContentFrame.Parent = MainFrame
+
+-- Helper UI Functions
+local function createBtn(text, size, pos, color, parent)
+	local btn = Instance.new("TextButton")
+	btn.Size = size
+	btn.Position = pos
+	btn.BackgroundColor3 = color
+	btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+	btn.Font = Enum.Font.GothamBold
+	btn.TextSize = 12
+	btn.Text = text
+	btn.Parent = parent
+	Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
+	return btn
+end
+
+local function createTextBox(placeholder, size, pos, parent)
+	local box = Instance.new("TextBox")
+	box.Size = size
+	box.Position = pos
+	box.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+	box.TextColor3 = Color3.fromRGB(255, 255, 255)
+	box.Font = Enum.Font.Gotham
+	box.TextSize = 11
+	box.PlaceholderText = placeholder
+	box.Text = ""
+	box.ClearTextOnFocus = false
+	box.Parent = parent
+	Instance.new("UICorner", box).CornerRadius = UDim.new(0, 6)
+	return box
+end
+
+local function createLabel(text, pos, parent)
+	local lbl = Instance.new("TextLabel")
+	lbl.Size = UDim2.new(1, -20, 0, 15)
+	lbl.Position = pos
+	lbl.BackgroundTransparency = 1
+	lbl.Text = text
+	lbl.TextColor3 = Color3.fromRGB(150, 150, 150)
+	lbl.Font = Enum.Font.Gotham
+	lbl.TextSize = 11
+	lbl.TextXAlignment = Enum.TextXAlignment.Left
+	lbl.Parent = parent
+	return lbl
+end
+
+-- --- BAGIAN 1: CURRENT SERVER INFO ---
+createLabel("Current Server Info", UDim2.new(0, 10, 0, 5), ContentFrame)
+
+local CurrentGameIdLabel = createLabel("Game ID: " .. game.PlaceId, UDim2.new(0, 10, 0, 25), ContentFrame)
+CurrentGameIdLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+
+local CurrentJobIdLabel = createLabel("Job ID: " .. game.JobId, UDim2.new(0, 10, 0, 45), ContentFrame)
+CurrentJobIdLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+CurrentJobIdLabel.TextWrapped = true
+CurrentJobIdLabel.Size = UDim2.new(1, -20, 0, 25)
+CurrentJobIdLabel.TextYAlignment = Enum.TextYAlignment.Top
+
+local CopyGameIdBtn = createBtn("Copy Game ID", UDim2.new(0.45, 0, 0, 30), UDim2.new(0, 10, 0, 75), Color3.fromRGB(70, 70, 70), ContentFrame)
+local CopyJobIdBtn = createBtn("Copy Job ID", UDim2.new(0.45, 0, 0, 30), UDim2.new(0.55, -10, 0, 75), Color3.fromRGB(70, 70, 70), ContentFrame)
+
+-- GARIS PEMISAH 1
+local Divider1 = Instance.new("Frame")
+Divider1.Size = UDim2.new(1, -20, 0, 2)
+Divider1.Position = UDim2.new(0, 10, 0, 115)
+Divider1.BackgroundColor3 = Color3.fromRGB(55, 55, 55)
+Divider1.BorderSizePixel = 0
+Divider1.Parent = ContentFrame
+
+-- --- BAGIAN 2: SPECIFIC SERVER JOINER ---
+createLabel("Join Specific Server", UDim2.new(0, 10, 0, 125), ContentFrame)
+
+local InputGameID = createTextBox("Target Game ID", UDim2.new(1, -20, 0, 30), UDim2.new(0, 10, 0, 145), ContentFrame)
+InputGameID.Text = tostring(game.PlaceId) -- Auto fill dengan game saat ini
+
+local InputJobID = createTextBox("Paste Target Job ID here...", UDim2.new(1, -20, 0, 30), UDim2.new(0, 10, 0, 180), ContentFrame)
+
+local JoinSpecificBtn = createBtn("Teleport to Job ID", UDim2.new(1, -20, 0, 35), UDim2.new(0, 10, 0, 215), Color3.fromRGB(0, 150, 200), ContentFrame)
+
+-- GARIS PEMISAH 2
+local Divider2 = Divider1:Clone()
+Divider2.Position = UDim2.new(0, 10, 0, 260)
+Divider2.Parent = ContentFrame
+
+-- --- BAGIAN 3: LOWEST SERVER HOPPER ---
+createLabel("Server Hopper", UDim2.new(0, 10, 0, 270), ContentFrame)
+
+local HopLowestBtn = createBtn("Find & Join Lowest Server", UDim2.new(1, -20, 0, 40), UDim2.new(0, 10, 0, 290), Color3.fromRGB(200, 100, 0), ContentFrame)
+
+local StatusLabel = createLabel("Status: Idle", UDim2.new(0, 10, 0, 335), ContentFrame)
+StatusLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+StatusLabel.TextXAlignment = Enum.TextXAlignment.Center
+
+-- ==========================================
+-- LOGIKA DRAGGING & WINDOW
+-- ==========================================
+local dragging, dragInput, mousePos, framePos
+
+TopBar.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+		dragging = true
+		mousePos = input.Position
+		framePos = MainFrame.Position
+		input.Changed:Connect(function()
+			if input.UserInputState == Enum.UserInputState.End then dragging = false end
+		end)
+	end
+end)
+
+TopBar.InputChanged:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+		dragInput = input
+	end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+	if input == dragInput and dragging then
+		local delta = input.Position - mousePos
+		MainFrame.Position = UDim2.new(framePos.X.Scale, framePos.X.Offset + delta.X, framePos.Y.Scale, framePos.Y.Offset + delta.Y)
+	end
+end)
+
+local isMinimized = false
+MinButton.MouseButton1Click:Connect(function()
+	isMinimized = not isMinimized
+	if isMinimized then
+		MainFrame:TweenSize(UDim2.new(0, 320, 0, 30), "Out", "Quad", 0.3, true)
+		ContentFrame.Visible = false
+	else
+		MainFrame:TweenSize(UDim2.new(0, 320, 0, 420), "Out", "Quad", 0.3, true)
+		ContentFrame.Visible = true
+	end
+end)
+
+CloseButton.MouseButton1Click:Connect(function() ScreenGui:Destroy() end)
+
+local function flashButton(btn, text, color)
+	local oriColor = btn.BackgroundColor3
+	local oriText = btn.Text
+	btn.BackgroundColor3 = color or Color3.fromRGB(50, 200, 50)
+	btn.Text = text
+	task.wait(1.5)
+	btn.BackgroundColor3 = oriColor
+	btn.Text = oriText
+end
+
+-- ==========================================
+-- LOGIKA BUTTONS (COPY & TELEPORT)
+-- ==========================================
+CopyGameIdBtn.MouseButton1Click:Connect(function()
+	if pcall(function() setclipboard(tostring(game.PlaceId)) end) then 
+        flashButton(CopyGameIdBtn, "Copied!") 
+    end
+end)
+
+CopyJobIdBtn.MouseButton1Click:Connect(function()
+	if pcall(function() setclipboard(tostring(game.JobId)) end) then 
+        flashButton(CopyJobIdBtn, "Copied!") 
+    end
+end)
+
+JoinSpecificBtn.MouseButton1Click:Connect(function()
+	local targetGameID = tonumber(InputGameID.Text)
+	local targetJobID = InputJobID.Text
+
+	if targetGameID and targetJobID ~= "" then
+		JoinSpecificBtn.Text = "Teleporting..."
+		StatusLabel.Text = "Status: Teleporting to specific server..."
+		pcall(function()
+			TeleportService:TeleportToPlaceInstance(targetGameID, targetJobID, player)
+		end)
+		task.wait(3)
+		JoinSpecificBtn.Text = "Teleport to Job ID"
+	else
+		flashButton(JoinSpecificBtn, "Invalid ID!", Color3.fromRGB(200, 50, 50))
+	end
+end)
+
+-- ==========================================
+-- LOGIKA LOWEST SERVER HOPPER
+-- ==========================================
+local AllIDs = {}
+local foundAnything = ""
+local actualHour = os.date("!*t").hour
+
+-- Load log server lama
+pcall(function()
+	AllIDs = HttpService:JSONDecode(readfile("NotSameServers.json"))
+end)
+if type(AllIDs) ~= "table" or AllIDs[1] ~= actualHour then
+	AllIDs = {actualHour}
+	pcall(function() writefile("NotSameServers.json", HttpService:JSONEncode(AllIDs)) end)
+end
+
+HopLowestBtn.MouseButton1Click:Connect(function()
+	if HopLowestBtn.Text == "Searching..." then return end -- Cegah spam klik
+	HopLowestBtn.Text = "Searching..."
+	StatusLabel.Text = "Status: Mencari server sepi..."
+	
+	table.insert(AllIDs, game.JobId) -- Blacklist server saat ini
+
+	local PlaceID = game.PlaceId
+	local apiURL = 'https://games.roblox.com/v1/games/' .. PlaceID .. '/servers/Public?sortOrder=Asc&limit=100'
+	
+	if foundAnything ~= "" then
+		apiURL = apiURL .. '&cursor=' .. foundAnything
+	end
+
+	-- Menjalankan pencarian di thread terpisah agar GUI tidak freeze
+	task.spawn(function()
+		local success, result = pcall(function()
+			return HttpService:JSONDecode(game:HttpGet(apiURL))
+		end)
+
+		if not success then
+			StatusLabel.Text = "Status: Gagal mengambil data API."
+			HopLowestBtn.Text = "Find & Join Lowest Server"
+			return
+		end
+
+		local Site = result
+		if Site.nextPageCursor and Site.nextPageCursor ~= "null" then
+			foundAnything = Site.nextPageCursor
+		end
+
+		local targetServerID = nil
+
+		for _, v in pairs(Site.data) do
+			local ID = tostring(v.id)
+			
+			-- Filter server sepi tapi tidak penuh, tidak ada ping error, dan bukan server saat ini
+			if v.playing < v.maxPlayers and v.ping and ID ~= game.JobId then
+				local isBlacklisted = false
+				for _, Existing in pairs(AllIDs) do
+					if ID == tostring(Existing) then
+						isBlacklisted = true
+						break
+					end
+				end
+
+				if not isBlacklisted then
+					targetServerID = ID
+					break
+				end
+			end
+		end
+
+		if targetServerID then
+			StatusLabel.Text = "Status: Server ditemukan! Teleporting..."
+			table.insert(AllIDs, targetServerID)
+			pcall(function()
+				writefile("NotSameServers.json", HttpService:JSONEncode(AllIDs))
+			end)
+			
+			TeleportService:TeleportToPlaceInstance(PlaceID, targetServerID, player)
+		else
+			StatusLabel.Text = "Status: Tidak ada server baru. Klik lagi."
+			HopLowestBtn.Text = "Find & Join Lowest Server"
+		end
+	end)
+end)
