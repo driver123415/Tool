@@ -1,0 +1,481 @@
+-- =========================================================
+-- ADVANCED UI CLICK DEBUGGER V5.3 (Y-OFFSET CALIBRATOR & RED DOT)
+-- =========================================================
+
+local Players = game:GetService("Players")
+local CoreGui = game:GetService("CoreGui")
+local UserInputService = game:GetService("UserInputService")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+local GuiService = game:GetService("GuiService")
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+local parentGui = pcall(function() return CoreGui.Name end) and CoreGui or playerGui
+
+local GUI_NAME = "UIDebuggerGUI_Advanced"
+if parentGui:FindFirstChild(GUI_NAME) then
+    parentGui[GUI_NAME]:Destroy()
+end
+
+-- ==========================================
+-- MEMBUAT UI ELEMENTS 
+-- ==========================================
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = GUI_NAME
+ScreenGui.ResetOnSpawn = false
+ScreenGui.DisplayOrder = 9999999
+ScreenGui.IgnoreGuiInset = true -- PENTING AGAR RED DOT PRESISI
+ScreenGui.Parent = parentGui
+
+local MainFrame = Instance.new("Frame")
+MainFrame.Size = UDim2.new(0, 350, 0, 540) -- Tinggi ditambah untuk offset tuner
+MainFrame.Position = UDim2.new(0.5, -175, 0.5, -270)
+MainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+MainFrame.BorderSizePixel = 0
+MainFrame.ClipsDescendants = true
+MainFrame.Parent = ScreenGui
+
+local UICorner = Instance.new("UICorner")
+UICorner.CornerRadius = UDim.new(0, 8)
+UICorner.Parent = MainFrame
+
+local TopBar = Instance.new("Frame")
+TopBar.Size = UDim2.new(1, 0, 0, 30)
+TopBar.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+TopBar.BorderSizePixel = 0
+TopBar.Parent = MainFrame
+Instance.new("UICorner", TopBar).CornerRadius = UDim.new(0, 8)
+
+local Title = Instance.new("TextLabel")
+Title.Size = UDim2.new(1, -70, 1, 0)
+Title.Position = UDim2.new(0, 10, 0, 0)
+Title.BackgroundTransparency = 1
+Title.Text = "UI Click Debugger V5.3 (Calibrator)"
+Title.TextColor3 = Color3.fromRGB(255, 255, 255)
+Title.Font = Enum.Font.GothamBold
+Title.TextSize = 14
+Title.TextXAlignment = Enum.TextXAlignment.Left
+Title.Parent = TopBar
+
+local MinButton = Instance.new("TextButton")
+MinButton.Size = UDim2.new(0, 30, 0, 30)
+MinButton.Position = UDim2.new(1, -60, 0, 0)
+MinButton.BackgroundTransparency = 1
+MinButton.Text = "-"
+MinButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+MinButton.Font = Enum.Font.GothamBold
+MinButton.TextSize = 18
+MinButton.Parent = TopBar
+
+local CloseButton = Instance.new("TextButton")
+CloseButton.Size = UDim2.new(0, 30, 0, 30)
+CloseButton.Position = UDim2.new(1, -30, 0, 0)
+CloseButton.BackgroundTransparency = 1
+CloseButton.Text = "X"
+CloseButton.TextColor3 = Color3.fromRGB(255, 50, 50)
+CloseButton.Font = Enum.Font.GothamBold
+CloseButton.TextSize = 14
+CloseButton.Parent = TopBar
+
+local ContentFrame = Instance.new("Frame")
+ContentFrame.Size = UDim2.new(1, 0, 1, -30)
+ContentFrame.Position = UDim2.new(0, 0, 0, 30)
+ContentFrame.BackgroundTransparency = 1
+ContentFrame.Parent = MainFrame
+
+local ToggleScannerBtn = Instance.new("TextButton")
+ToggleScannerBtn.Size = UDim2.new(0.9, 0, 0, 35)
+ToggleScannerBtn.Position = UDim2.new(0.05, 0, 0, 10)
+ToggleScannerBtn.BackgroundColor3 = Color3.fromRGB(200, 80, 80)
+ToggleScannerBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+ToggleScannerBtn.Font = Enum.Font.GothamBold
+ToggleScannerBtn.TextSize = 14
+ToggleScannerBtn.Text = "Scanner Status: OFF"
+ToggleScannerBtn.Parent = ContentFrame
+Instance.new("UICorner", ToggleScannerBtn).CornerRadius = UDim.new(0, 6)
+
+local CopyAllBtn = Instance.new("TextButton")
+CopyAllBtn.Size = UDim2.new(0.9, 0, 0, 25)
+CopyAllBtn.Position = UDim2.new(0.05, 0, 0, 50)
+CopyAllBtn.BackgroundColor3 = Color3.fromRGB(0, 150, 200)
+CopyAllBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+CopyAllBtn.Font = Enum.Font.GothamBold
+CopyAllBtn.TextSize = 12
+CopyAllBtn.Text = "Copy All Results"
+CopyAllBtn.Parent = ContentFrame
+Instance.new("UICorner", CopyAllBtn).CornerRadius = UDim.new(0, 6)
+
+local ClearBtn = Instance.new("TextButton")
+ClearBtn.Size = UDim2.new(0.9, 0, 0, 25)
+ClearBtn.Position = UDim2.new(0.05, 0, 0, 80)
+ClearBtn.BackgroundColor3 = Color3.fromRGB(70, 70, 70)
+ClearBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+ClearBtn.Font = Enum.Font.Gotham
+ClearBtn.TextSize = 12
+ClearBtn.Text = "Clear Results"
+ClearBtn.Parent = ContentFrame
+Instance.new("UICorner", ClearBtn).CornerRadius = UDim.new(0, 6)
+
+local RepeatBtn = Instance.new("TextButton")
+RepeatBtn.Size = UDim2.new(0.43, 0, 0, 30)
+RepeatBtn.Position = UDim2.new(0.05, 0, 0, 110)
+RepeatBtn.BackgroundColor3 = Color3.fromRGB(150, 100, 200)
+RepeatBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+RepeatBtn.Font = Enum.Font.GothamBold
+RepeatBtn.TextSize = 12
+RepeatBtn.Text = "Repeat Last Click"
+RepeatBtn.Parent = ContentFrame
+Instance.new("UICorner", RepeatBtn).CornerRadius = UDim.new(0, 6)
+
+local CopyRealBtn = Instance.new("TextButton")
+CopyRealBtn.Size = UDim2.new(0.43, 0, 0, 30)
+CopyRealBtn.Position = UDim2.new(0.52, 0, 0, 110)
+CopyRealBtn.BackgroundColor3 = Color3.fromRGB(200, 150, 50)
+CopyRealBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+CopyRealBtn.Font = Enum.Font.GothamBold
+CopyRealBtn.TextSize = 12
+CopyRealBtn.Text = "Copy Real Path"
+CopyRealBtn.Parent = ContentFrame
+Instance.new("UICorner", CopyRealBtn).CornerRadius = UDim.new(0, 6)
+
+-- ==========================================
+-- FITUR BARU: Y-OFFSET CALIBRATOR
+-- ==========================================
+local vimYOffset = 0
+
+local OffsetFrame = Instance.new("Frame")
+OffsetFrame.Size = UDim2.new(0.9, 0, 0, 25)
+OffsetFrame.Position = UDim2.new(0.05, 0, 0, 145)
+OffsetFrame.BackgroundTransparency = 1
+OffsetFrame.Parent = ContentFrame
+
+local OffsetMinus = Instance.new("TextButton")
+OffsetMinus.Size = UDim2.new(0.25, 0, 1, 0)
+OffsetMinus.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
+OffsetMinus.TextColor3 = Color3.fromRGB(255, 255, 255)
+OffsetMinus.Font = Enum.Font.GothamBold
+OffsetMinus.TextSize = 12
+OffsetMinus.Text = "[-10 Y] UP"
+Instance.new("UICorner", OffsetMinus).CornerRadius = UDim.new(0, 4)
+OffsetMinus.Parent = OffsetFrame
+
+local OffsetValue = Instance.new("TextLabel")
+OffsetValue.Size = UDim2.new(0.5, 0, 1, 0)
+OffsetValue.Position = UDim2.new(0.25, 0, 0, 0)
+OffsetValue.BackgroundTransparency = 1
+OffsetValue.Text = "VIM Y Offset: 0px"
+OffsetValue.TextColor3 = Color3.fromRGB(200, 200, 255)
+OffsetValue.Font = Enum.Font.GothamBold
+OffsetValue.TextSize = 12
+OffsetValue.Parent = OffsetFrame
+
+local OffsetPlus = Instance.new("TextButton")
+OffsetPlus.Size = UDim2.new(0.25, 0, 1, 0)
+OffsetPlus.Position = UDim2.new(0.75, 0, 0, 0)
+OffsetPlus.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
+OffsetPlus.TextColor3 = Color3.fromRGB(255, 255, 255)
+OffsetPlus.Font = Enum.Font.GothamBold
+OffsetPlus.TextSize = 12
+OffsetPlus.Text = "[+10 Y] DOWN"
+Instance.new("UICorner", OffsetPlus).CornerRadius = UDim.new(0, 4)
+OffsetPlus.Parent = OffsetFrame
+
+OffsetMinus.MouseButton1Click:Connect(function()
+    vimYOffset = vimYOffset - 10
+    OffsetValue.Text = "VIM Y Offset: " .. vimYOffset .. "px"
+end)
+
+OffsetPlus.MouseButton1Click:Connect(function()
+    vimYOffset = vimYOffset + 10
+    OffsetValue.Text = "VIM Y Offset: " .. vimYOffset .. "px"
+end)
+
+-- ==========================================
+
+local ResultsScroll = Instance.new("ScrollingFrame")
+ResultsScroll.Size = UDim2.new(0.96, 0, 1, -185)
+ResultsScroll.Position = UDim2.new(0.02, 0, 0, 175)
+ResultsScroll.BackgroundTransparency = 1
+ResultsScroll.ScrollBarThickness = 4
+ResultsScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+ResultsScroll.Parent = ContentFrame
+
+local UIListLayout = Instance.new("UIListLayout")
+UIListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+UIListLayout.Padding = UDim.new(0, 5)
+UIListLayout.Parent = ResultsScroll
+
+UIListLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+    ResultsScroll.CanvasSize = UDim2.new(0, 0, 0, UIListLayout.AbsoluteContentSize.Y)
+end)
+
+local dragging, dragInput, mousePos, framePos
+TopBar.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true; mousePos = input.Position; framePos = MainFrame.Position
+        input.Changed:Connect(function() if input.UserInputState == Enum.UserInputState.End then dragging = false end end)
+    end
+end)
+TopBar.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then dragInput = input end
+end)
+UserInputService.InputChanged:Connect(function(input)
+    if input == dragInput and dragging then
+        local delta = input.Position - mousePos
+        MainFrame.Position = UDim2.new(framePos.X.Scale, framePos.X.Offset + delta.X, framePos.Y.Scale, framePos.Y.Offset + delta.Y)
+    end
+end)
+
+local isMinimized = false
+MinButton.MouseButton1Click:Connect(function()
+    isMinimized = not isMinimized
+    MainFrame:TweenSize(isMinimized and UDim2.new(0, 350, 0, 30) or UDim2.new(0, 350, 0, 540), "Out", "Quad", 0.3, true)
+    ContentFrame.Visible = not isMinimized
+end)
+
+CloseButton.MouseButton1Click:Connect(function() 
+    if _G.UIClickDebuggerConnection then _G.UIClickDebuggerConnection:Disconnect() end
+    ScreenGui:Destroy() 
+end)
+
+-- ==========================================
+-- VISUAL RED DOT DEBUGGER
+-- ==========================================
+local function createRedDot(x, y)
+    local dot = Instance.new("Frame")
+    dot.Size = UDim2.new(0, 10, 0, 10) -- Dot 10x10 pixel
+    dot.AnchorPoint = Vector2.new(0.5, 0.5)
+    dot.Position = UDim2.new(0, x, 0, y)
+    dot.BackgroundColor3 = Color3.fromRGB(255, 0, 0) -- Merah menyala
+    dot.BorderSizePixel = 0
+    dot.ZIndex = 999999999
+    
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(1, 0)
+    corner.Parent = dot
+    
+    dot.Parent = ScreenGui
+    
+    -- Hilang otomatis dalam 2 detik
+    task.delay(2, function()
+        if dot then dot:Destroy() end
+    end)
+end
+
+-- ==========================================
+-- CORE SCANNER LOGIC
+-- ==========================================
+local isScanning = false
+local allResultsData = ""
+local lastClickedObjects = {} 
+local lastValidPath = "" 
+
+ToggleScannerBtn.MouseButton1Click:Connect(function()
+    isScanning = not isScanning
+    if isScanning then
+        ToggleScannerBtn.Text = "Scanner Status: ON (Click UI now!)"
+        ToggleScannerBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
+    else
+        ToggleScannerBtn.Text = "Scanner Status: OFF"
+        ToggleScannerBtn.BackgroundColor3 = Color3.fromRGB(200, 80, 80)
+    end
+end)
+
+local function flashButton(btn, text, color)
+    task.spawn(function()
+        local oriColor = btn.BackgroundColor3
+        local oriText = btn.Text
+        btn.BackgroundColor3 = color or Color3.fromRGB(50, 200, 50)
+        btn.Text = text
+        task.wait(1.5)
+        btn.BackgroundColor3 = oriColor
+        btn.Text = oriText
+    end)
+end
+
+ClearBtn.MouseButton1Click:Connect(function()
+    allResultsData = ""
+    lastClickedObjects = {}
+    lastValidPath = ""
+    for _, child in ipairs(ResultsScroll:GetChildren()) do
+        if child:IsA("Frame") then child:Destroy() end
+    end
+    flashButton(ClearBtn, "Cleared!", Color3.fromRGB(100, 100, 100))
+end)
+
+CopyAllBtn.MouseButton1Click:Connect(function()
+    if allResultsData ~= "" and pcall(function() setclipboard(allResultsData) end) then
+        flashButton(CopyAllBtn, "All Paths Copied!", Color3.fromRGB(50, 200, 50))
+    else
+        flashButton(CopyAllBtn, "Nothing to copy!", Color3.fromRGB(200, 80, 80))
+    end
+end)
+
+local function getFullPath(obj)
+    local path = obj.Name
+    local current = obj.Parent
+    while current and current ~= game do
+        if string.match(current.Name, "%s") then
+            path = '["' .. current.Name .. '"].' .. path
+        else
+            path = current.Name .. "." .. path
+        end
+        current = current.Parent
+    end
+    return path
+end
+
+local function createResultFrame(layerNum, obj)
+    local fullPathText = getFullPath(obj)
+    allResultsData = allResultsData .. "Layer " .. layerNum .. " [" .. obj.ClassName .. "]: " .. obj.Name .. "\nPath: " .. fullPathText .. "\n"
+
+    local frame = Instance.new("Frame")
+    frame.Size = UDim2.new(1, -10, 0, 75)
+    frame.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+    frame.BorderSizePixel = 0
+    Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 6)
+    
+    local title = Instance.new("TextLabel")
+    title.Size = UDim2.new(1, -10, 0, 20)
+    title.Position = UDim2.new(0, 5, 0, 5)
+    title.BackgroundTransparency = 1
+    title.Text = "Layer " .. layerNum .. " : [" .. obj.ClassName .. "] " .. obj.Name
+    title.TextColor3 = obj:IsA("GuiButton") and Color3.fromRGB(50, 255, 50) or Color3.fromRGB(255, 200, 100)
+    title.Font = Enum.Font.GothamBold
+    title.TextSize = 12
+    title.TextXAlignment = Enum.TextXAlignment.Left
+    title.Parent = frame
+    
+    local pathDisplay = Instance.new("TextLabel")
+    pathDisplay.Size = UDim2.new(0.7, 0, 0, 40)
+    pathDisplay.Position = UDim2.new(0, 5, 0, 25)
+    pathDisplay.BackgroundTransparency = 1
+    pathDisplay.Text = fullPathText
+    pathDisplay.TextColor3 = Color3.fromRGB(200, 200, 200)
+    pathDisplay.Font = Enum.Font.Code
+    pathDisplay.TextSize = 10
+    pathDisplay.TextXAlignment = Enum.TextXAlignment.Left
+    pathDisplay.TextYAlignment = Enum.TextYAlignment.Top
+    pathDisplay.TextWrapped = true
+    pathDisplay.Parent = frame
+    
+    local copyBtn = Instance.new("TextButton")
+    copyBtn.Size = UDim2.new(0.25, 0, 0, 25)
+    copyBtn.Position = UDim2.new(0.72, 0, 0, 30)
+    copyBtn.BackgroundColor3 = Color3.fromRGB(0, 150, 200)
+    copyBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    copyBtn.Font = Enum.Font.GothamBold
+    copyBtn.TextSize = 11
+    copyBtn.Text = "Copy Path"
+    Instance.new("UICorner", copyBtn).CornerRadius = UDim.new(0, 4)
+    copyBtn.Parent = frame
+    
+    copyBtn.MouseButton1Click:Connect(function()
+        if pcall(function() setclipboard(fullPathText) end) then
+            flashButton(copyBtn, "Copied!")
+        end
+    end)
+    frame.Parent = ResultsScroll
+end
+
+-- ==========================================
+-- LOGIKA REPEAT CLICK (SMART TARGET + CALIBRATION)
+-- ==========================================
+RepeatBtn.MouseButton1Click:Connect(function()
+    if #lastClickedObjects == 0 then
+        flashButton(RepeatBtn, "No UI Scanned!", Color3.fromRGB(200, 80, 80))
+        return
+    end
+
+    local targetBtn = nil
+    local smallestArea = math.huge
+
+    for _, obj in ipairs(lastClickedObjects) do
+        if obj:IsA("GuiButton") and obj.Parent then
+            local area = obj.AbsoluteSize.X * obj.AbsoluteSize.Y
+            if area < smallestArea then
+                smallestArea = area
+                targetBtn = obj
+            end
+        end
+    end
+
+    if targetBtn then
+        lastValidPath = getFullPath(targetBtn)
+        local absPos = targetBtn.AbsolutePosition
+        local absSize = targetBtn.AbsoluteSize
+        
+        local insetX, insetY = 0, 0
+        local screenGui = targetBtn:FindFirstAncestorOfClass("ScreenGui")
+        
+        if screenGui and not screenGui.IgnoreGuiInset then
+            local insetTopLeft = GuiService:GetGuiInset()
+            insetX = insetTopLeft.X
+            insetY = insetTopLeft.Y
+        end
+        
+        -- Kalkulasi posisi tengah + DITAMBAH OFFSET MANUAL
+        local centerX = absPos.X + (absSize.X / 2) + insetX
+        local centerY = absPos.Y + (absSize.Y / 2) + insetY + vimYOffset
+
+        -- 1. Spawn Red Dot Visualizer
+        createRedDot(centerX, centerY)
+
+        -- 2. Simulasi Klik
+        VirtualInputManager:SendMouseButtonEvent(centerX, centerY, 0, true, game, 1) 
+        task.wait(0.05)
+        VirtualInputManager:SendMouseButtonEvent(centerX, centerY, 0, false, game, 1) 
+        
+        flashButton(RepeatBtn, "VIM Clicked!", Color3.fromRGB(50, 200, 50))
+    else
+        flashButton(RepeatBtn, "No Button!", Color3.fromRGB(200, 80, 80))
+    end
+end)
+
+CopyRealBtn.MouseButton1Click:Connect(function()
+    if lastValidPath ~= "" and pcall(function() setclipboard(lastValidPath) end) then
+        flashButton(CopyRealBtn, "Real Path Copied!", Color3.fromRGB(50, 200, 50))
+    else
+        flashButton(CopyRealBtn, "Repeat Click First!", Color3.fromRGB(200, 80, 80))
+    end
+end)
+
+-- ==========================================
+-- INPUT LISTENER (SCANNER)
+-- ==========================================
+if _G.UIClickDebuggerConnection then _G.UIClickDebuggerConnection:Disconnect() end
+
+_G.UIClickDebuggerConnection = UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if not isScanning then return end
+    
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        local posX = input.Position.X
+        local posY = input.Position.Y
+        
+        local guiObjects = playerGui:GetGuiObjectsAtPosition(posX, posY)
+        
+        if #guiObjects > 0 then
+            allResultsData = ""
+            lastClickedObjects = {}
+            lastValidPath = ""
+
+            for _, child in ipairs(ResultsScroll:GetChildren()) do
+                if child:IsA("Frame") then child:Destroy() end
+            end
+            
+            local count = 0
+            for i, obj in ipairs(guiObjects) do
+                if not obj:IsDescendantOf(ScreenGui) then
+                    count = count + 1
+                    table.insert(lastClickedObjects, obj)
+                    createResultFrame(count, obj)
+                end
+            end
+            
+            isScanning = false
+            ToggleScannerBtn.Text = "Scanner Status: OFF"
+            ToggleScannerBtn.BackgroundColor3 = Color3.fromRGB(200, 80, 80)
+        end
+    end
+end)
