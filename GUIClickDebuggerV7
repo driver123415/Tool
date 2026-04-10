@@ -1,5 +1,5 @@
 -- =========================================================
--- ADVANCED UI CLICK DEBUGGER V6 (PERFECT PIXEL REPEAT)
+-- ADVANCED UI CLICK DEBUGGER V6.1 (EMULATOR/TOUCH FIX & PIXEL PERFECT) goblok gabisa aneh
 -- =========================================================
 
 local Players = game:GetService("Players")
@@ -47,7 +47,7 @@ local Title = Instance.new("TextLabel")
 Title.Size = UDim2.new(1, -70, 1, 0)
 Title.Position = UDim2.new(0, 10, 0, 0)
 Title.BackgroundTransparency = 1
-Title.Text = "UI Click Debugger V6 (Pixel Perfect)"
+Title.Text = "UI Click Debugger V6.1 (Fixed)"
 Title.TextColor3 = Color3.fromRGB(255, 255, 255)
 Title.Font = Enum.Font.GothamBold
 Title.TextSize = 14
@@ -114,7 +114,7 @@ ClearBtn.Parent = ContentFrame
 Instance.new("UICorner", ClearBtn).CornerRadius = UDim.new(0, 6)
 
 local RepeatBtn = Instance.new("TextButton")
-RepeatBtn.Size = UDim2.new(0.9, 0, 0, 30) -- Dilebarkan karena fitur real path diurus manual
+RepeatBtn.Size = UDim2.new(0.9, 0, 0, 30) 
 RepeatBtn.Position = UDim2.new(0.05, 0, 0, 110)
 RepeatBtn.BackgroundColor3 = Color3.fromRGB(150, 100, 200)
 RepeatBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -143,12 +143,16 @@ end)
 
 local dragging, dragInput, mousePos, framePos
 TopBar.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
         dragging = true; mousePos = input.Position; framePos = MainFrame.Position
         input.Changed:Connect(function() if input.UserInputState == Enum.UserInputState.End then dragging = false end end)
     end
 end)
-TopBar.InputChanged:Connect(function(input) if input.UserInputType == Enum.UserInputType.MouseMovement then dragInput = input end end)
+TopBar.InputChanged:Connect(function(input) 
+    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then 
+        dragInput = input 
+    end 
+end)
 UserInputService.InputChanged:Connect(function(input)
     if input == dragInput and dragging then
         local delta = input.Position - mousePos
@@ -263,22 +267,30 @@ local function createResultFrame(layerNum, obj)
     frame.Parent = ResultsScroll
 end
 
+-- ==========================================
+-- LOGIKA REPEAT CLICK PIXEL PERFECT
+-- ==========================================
 RepeatBtn.MouseButton1Click:Connect(function()
     if lastScanX == 0 and lastScanY == 0 then
         flashButton(RepeatBtn, "No UI Scanned!", Color3.fromRGB(200, 80, 80))
         return
     end
-    -- VIM menembak murni di titik pixel terakhir kali mouse diklik
+    -- VIM menembak murni di titik pixel terakhir kali mouse/touch diklik
     VirtualInputManager:SendMouseButtonEvent(lastScanX, lastScanY, 0, true, game, 1) 
     task.wait(0.05)
     VirtualInputManager:SendMouseButtonEvent(lastScanX, lastScanY, 0, false, game, 1) 
     flashButton(RepeatBtn, "Pixel Perfect Click!", Color3.fromRGB(50, 200, 50))
 end)
 
+-- ==========================================
+-- LISTENER INPUT (FIXED UNTUK EMULATOR/TOUCH)
+-- ==========================================
 if _G.UIClickDebuggerConnection then _G.UIClickDebuggerConnection:Disconnect() end
 _G.UIClickDebuggerConnection = UserInputService.InputBegan:Connect(function(input, gameProcessed)
     if not isScanning then return end
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+    
+    -- KUNCI FIX NYA DISINI: Tambahkan Enum.UserInputType.Touch
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
         lastScanX, lastScanY = input.Position.X, input.Position.Y
         local guiObjects = playerGui:GetGuiObjectsAtPosition(lastScanX, lastScanY)
         
