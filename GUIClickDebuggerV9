@@ -1,5 +1,5 @@
 -- =========================================================
--- ADVANCED UI CLICK DEBUGGER V5.3 (Y-OFFSET CALIBRATOR & RED DOT)
+-- ADVANCED UI CLICK DEBUGGER V5.3 (Y-OFFSET CALIBRATOR & RED DOT) bagus
 -- =========================================================
 
 local Players = game:GetService("Players")
