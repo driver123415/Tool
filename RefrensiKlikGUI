@@ -17,3 +17,338 @@ for i = 1, 3 do
 end
 
 print("sukses")
+
+
+
+-------------------------------------------------------------------------------------------
+
+
+local btn = Players.dandilur123.PlayerGui.GameGuiNoInset.Screen.Top.WaveControls.AutoSkip
+
+-- ==============================
+-- METHOD 1: getconnections + Fire (metode original)
+-- ==============================
+local btn = Players.dandilur123.PlayerGui.GameGuiNoInset.Screen.Top.WaveControls.AutoSkip
+local Connections = {"Activated", "MouseButton1Click", "MouseButton1Down"}
+for _, connectionType in next, Connections do
+    if btn[connectionType] then
+        for _, conn in next, getconnections(btn[connectionType]) do
+            conn:Fire()
+        end
+    end
+end
+print("Method 1 - getconnections fired")
+
+
+-- ==============================
+-- METHOD 2: firesignal
+-- ==============================
+local btn = Players.dandilur123.PlayerGui.GameGuiNoInset.Screen.Top.WaveControls.AutoSkip
+firesignal(btn.Activated)
+firesignal(btn.MouseButton1Click)
+firesignal(btn.MouseButton1Down)
+print("Method 2 - firesignal fired")
+
+
+-- ==============================
+-- METHOD 3: firesignal dengan pcall (aman dari error)
+-- ==============================
+local btn = Players.dandilur123.PlayerGui.GameGuiNoInset.Screen.Top.WaveControls.AutoSkip
+local signals = {"Activated", "MouseButton1Click", "MouseButton1Down", "MouseButton1Up"}
+for _, sig in ipairs(signals) do
+    pcall(function()
+        firesignal(btn[sig])
+    end)
+end
+print("Method 3 - firesignal pcall fired")
+
+
+-- ==============================
+-- METHOD 4: VirtualUser simulasi klik mouse
+-- ==============================
+local btn = Players.dandilur123.PlayerGui.GameGuiNoInset.Screen.Top.WaveControls.AutoSkip
+local VirtualUser = game:GetService("VirtualUser")
+local pos = btn.AbsolutePosition + (btn.AbsoluteSize / 2)
+VirtualUser:Button1Down(pos, workspace.CurrentCamera.CFrame)
+task.wait(0.1)
+VirtualUser:Button1Up(pos, workspace.CurrentCamera.CFrame)
+print("Method 4 - VirtualUser fired")
+
+
+-- ==============================
+-- METHOD 5: TweenPosition lalu fire (paksa visible + fire)
+-- ==============================
+local btn = Players.dandilur123.PlayerGui.GameGuiNoInset.Screen.Top.WaveControls.AutoSkip
+btn.Visible = true
+btn.Active = true
+firesignal(btn.Activated)
+print("Method 5 - Force visible + firesignal fired")
+
+
+-- ==============================
+-- METHOD 6: Simulasi input via UserInputService (vanilla)
+-- ==============================
+local btn = Players.dandilur123.PlayerGui.GameGuiNoInset.Screen.Top.WaveControls.AutoSkip
+local UIS = game:GetService("UserInputService")
+local inputObj = {
+    UserInputType = Enum.UserInputType.MouseButton1,
+    UserInputState = Enum.UserInputState.Begin,
+    Position = btn.AbsolutePosition
+}
+btn:SimulateClick() -- beberapa exploit support ini
+print("Method 6 - SimulateClick fired")
+
+
+-- ==============================
+-- METHOD 7: Invoke semua BindableEvent/Function yang terhubung
+-- ==============================
+local btn = Players.dandilur123.PlayerGui.GameGuiNoInset.Screen.Top.WaveControls.AutoSkip
+for _, child in ipairs(btn:GetDescendants()) do
+    if child:IsA("BindableEvent") then
+        pcall(function() child:Fire() end)
+    elseif child:IsA("BindableFunction") then
+        pcall(function() child:Invoke() end)
+    end
+end
+print("Method 7 - BindableEvent/Function fired")
+
+
+-- ==============================
+-- METHOD 8: ALL-IN-ONE (paling OP, gabungan semua)
+-- ==============================
+local btn = Players.dandilur123.PlayerGui.GameGuiNoInset.Screen.Top.WaveControls.AutoSkip
+pcall(function() firesignal(btn.Activated) end)
+pcall(function() firesignal(btn.MouseButton1Click) end)
+pcall(function() firesignal(btn.MouseButton1Down) end)
+pcall(function()
+    for _, conn in next, getconnections(btn.Activated) do conn:Fire() end
+end)
+pcall(function()
+    for _, conn in next, getconnections(btn.MouseButton1Click) do conn:Fire() end
+end)
+pcall(function()
+    local vu = game:GetService("VirtualUser")
+    local pos = btn.AbsolutePosition + (btn.AbsoluteSize / 2)
+    vu:Button1Down(pos, workspace.CurrentCamera.CFrame)
+    task.wait(0.05)
+    vu:Button1Up(pos, workspace.CurrentCamera.CFrame)
+end)
+print("Method 8 - ALL IN ONE fired")
+
+-- ==============================
+-- Method 9: mousemoverel + mouse1click
+-- ==============================
+local btn = Players.dandilur123.PlayerGui.GameGuiNoInset.Screen.Top.WaveControls.AutoSkip
+
+local pos = btn.AbsolutePosition + (btn.AbsoluteSize / 2)
+mousemoveabs(pos.X, pos.Y)
+task.wait(0.05)
+mouse1click()
+print("Method 9 - mouse1click fired")
+
+-- ==============================
+-- Method 10: mouse1press + mouse1release
+-- ==============================
+local btn = Players.dandilur123.PlayerGui.GameGuiNoInset.Screen.Top.WaveControls.AutoSkip
+
+local pos = btn.AbsolutePosition + (btn.AbsoluteSize / 2)
+mousemoveabs(pos.X, pos.Y)
+task.wait(0.05)
+mouse1press()
+task.wait(0.1)
+mouse1release()
+print("Method 10 - mouse1press/release fired")
+
+-- ==============================
+-- Method 11: keypress simulasi Enter/Space di button
+-- ==============================
+local btn = Players.dandilur123.PlayerGui.GameGuiNoInset.Screen.Top.WaveControls.AutoSkip
+
+btn:CaptureFocus() -- fokus ke button
+task.wait(0.05)
+keypress(0x0D) -- Enter key
+task.wait(0.05)
+keyrelease(0x0D)
+print("Method 11 - keypress Enter fired")
+
+-- ==============================
+-- Method 12: Manipulasi GuiButton internal property
+-- ==============================
+local btn = Players.dandilur123.PlayerGui.GameGuiNoInset.Screen.Top.WaveControls.AutoSkip
+
+-- Force aktifkan properti internal
+btn.AutoButtonColor = false
+btn.Active = true
+btn.Selectable = true
+btn.Modal = true
+
+firesignal(btn.Activated)
+firesignal(btn.MouseButton1Click)
+print("Method 12 - Force property + fire fired")
+
+-- ==============================
+-- Method 13: RunService loop sampai berhasil
+-- ==============================
+local btn = Players.dandilur123.PlayerGui.GameGuiNoInset.Screen.Top.WaveControls.AutoSkip
+
+local RunService = game:GetService("RunService")
+local attempts = 0
+local connection
+connection = RunService.Heartbeat:Connect(function()
+    attempts += 1
+    pcall(function() firesignal(btn.Activated) end)
+    pcall(function() firesignal(btn.MouseButton1Click) end)
+    pcall(function()
+        for _, conn in next, getconnections(btn.Activated) do
+            conn:Fire()
+        end
+    end)
+    if attempts >= 10 then
+        connection:Disconnect()
+        print("Method 13 - Heartbeat loop selesai")
+    end
+end)
+
+-- ==============================
+-- Method 14: Cari & Fire RemoteEvent yang dipanggil tombol
+-- ==============================
+-- Monitor semua remote yang di-fire saat tombol ditekan
+local mt = getrawmetatable(game)
+local oldIndex = mt.__index
+setreadonly(mt, false)
+mt.__namecall = function(self, ...)
+    local args = {...}
+    local method = args[#args]
+    if method == "FireServer" or method == "InvokeServer" then
+        print("Remote fired:", self, args)
+        -- Dari sini kamu tahu remote mana yang dipanggil
+    end
+    return oldIndex(self, ...)
+end
+setreadonly(mt, true)
+print("Method 14 - Remote spy aktif")
+
+-- ==============================
+-- Method 15: setclipboard + Inject via loadstring
+-- ==============================
+local btn = Players.dandilur123.PlayerGui.GameGuiNoInset.Screen.Top.WaveControls.AutoSkip
+
+-- Execute langsung via coroutine baru
+coroutine.wrap(function()
+    while task.wait(0.5) do
+        pcall(function() firesignal(btn.Activated) end)
+        pcall(function()
+            for _, c in next, getconnections(btn.Activated) do
+                c:Fire()
+            end
+        end)
+    end
+end)()
+print("Method 15 - Coroutine loop fired")
+
+-- ==============================
+-- Method 16: Hook __index metamethod tombol
+-- ==============================
+local btn = Players.dandilur123.PlayerGui.GameGuiNoInset.Screen.Top.WaveControls.AutoSkip
+
+local mt = getrawmetatable(btn)
+local old = mt.__index
+setreadonly(mt, false)
+mt.__index = function(self, key)
+    print("Accessed:", key) -- debug property apa yang diakses
+    return old(self, key)
+end
+setreadonly(mt, true)
+
+-- Lalu fire
+firesignal(btn.Activated)
+print("Method 16 - Metamethod hook fired")
+
+
+-- ==============================
+-- Method 17: ⚡ PALING OP — Gabungan + Retry otomatis
+-- ==============================
+local btn = Players.dandilur123.PlayerGui.GameGuiNoInset.Screen.Top.WaveControls.AutoSkip
+
+local function superClick()
+    -- Layer 1: firesignal semua event
+    local events = {"Activated","MouseButton1Click","MouseButton1Down","MouseButton1Up","SelectionGained"}
+    for _, e in ipairs(events) do
+        pcall(function() firesignal(btn[e]) end)
+    end
+
+    -- Layer 2: getconnections
+    for _, e in ipairs(events) do
+        pcall(function()
+            for _, c in next, getconnections(btn[e]) do c:Fire() end
+        end)
+    end
+
+    -- Layer 3: VirtualUser
+    pcall(function()
+        local vu = game:GetService("VirtualUser")
+        local pos = btn.AbsolutePosition + (btn.AbsoluteSize / 2)
+        vu:Button1Down(pos, workspace.CurrentCamera.CFrame)
+        task.wait(0.05)
+        vu:Button1Up(pos, workspace.CurrentCamera.CFrame)
+    end)
+
+    -- Layer 4: mouse functions
+    pcall(function()
+        local pos = btn.AbsolutePosition + (btn.AbsoluteSize / 2)
+        mousemoveabs(pos.X, pos.Y)
+        task.wait(0.05)
+        mouse1press()
+        task.wait(0.05)
+        mouse1release()
+    end)
+
+    -- Layer 5: Force visible & active
+    pcall(function()
+        btn.Visible = true
+        btn.Active = true
+        btn.Selectable = true
+    end)
+end
+
+-- Retry 5x sampai berhasil
+for i = 1, 5 do
+    task.wait(1)
+    superClick()
+    print("Attempt:", i)
+end
+print("Method 17 - SUPER CLICK selesai")
+
+
+-- ==============================
+-- Method 18: ⚡ Virtual input machine 
+-- ==============================
+
+-- === GENERATED VIM AUTO-CLICK SCRIPT ===
+local VirtualInputManager = game:GetService("VirtualInputManager")
+local GuiService = game:GetService("GuiService")
+
+local function AutoClickUI(buttonObj, offsetX, offsetY)
+    if not buttonObj or not buttonObj.Parent then 
+        warn("Tombol tidak ditemukan / belum di-render!")
+        return 
+    end
+    
+    local screenGui = buttonObj:FindFirstAncestorOfClass("ScreenGui")
+    local insetX, insetY = 0, 0
+    if screenGui and not screenGui.IgnoreGuiInset then
+        local insetTopLeft = GuiService:GetGuiInset()
+        insetX, insetY = insetTopLeft.X, insetTopLeft.Y
+    end
+    
+    local centerX = buttonObj.AbsolutePosition.X + (buttonObj.AbsoluteSize.X / 2) + insetX + offsetX
+    local centerY = buttonObj.AbsolutePosition.Y + (buttonObj.AbsoluteSize.Y / 2) + insetY + offsetY
+
+    VirtualInputManager:SendMouseButtonEvent(centerX, centerY, 0, true, game, 1)
+    task.wait(0.05)
+    VirtualInputManager:SendMouseButtonEvent(centerX, centerY, 0, false, game, 1)
+end
+
+-- Eksekusi Klik (Universal Path)
+local targetBtn = game:GetService("Players").LocalPlayer.PlayerGui.HUD.Lobby.Left.Content.GridButtons.Quests
+AutoClickUI(targetBtn, 0, 60)
