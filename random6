@@ -5,7 +5,7 @@
 local CustomConfig = {
 	ESP_Enabled = true,
 	Low_Graphics = false,
-	Fullbright = false,
+	Fullbright = true,
 	Noclip = true,
 	Fly = true,
 	Fly_Speed = 50,
