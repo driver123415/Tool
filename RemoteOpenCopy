@@ -1,0 +1,85 @@
+-- Cara Menggunakannya:
+-- 1. Pastikan SimpleSpy yang lama dimatikan atau jangan di-execute agar tidak bentrok.
+-- 2. Execute script pendek ini.
+-- 3. Lakukan aktivitas di game (mati, lalu klik tombol Leave Lobby/Teleport).
+-- 4. Saat karaktermu langsung ter-teleport, buka Notepad atau text editor lainnya, lalu tekan Ctrl + V (Paste).
+-- 5. Script remote untuk teleport akan otomatis muncul.
+
+-- ==========================================
+-- SIMPLE INSTANT AUTO-COPY REMOTE BYPASS
+-- ==========================================
+
+-- Fungsi untuk mendapatkan path dari Remote
+local function getPath(instance)
+	local path = ""
+	local current = instance
+	while current and current ~= game do
+		local name = current.Name
+		-- Cek apakah nama instance mengandung spasi atau karakter aneh
+		if name:match("^[%a_][%w_]*$") then
+			path = "." .. name .. path
+		else
+			path = '["' .. name .. '"]' .. path
+		end
+		current = current.Parent
+	end
+	return "game" .. path
+end
+
+-- Fungsi sederhana untuk menerjemahkan argumen menjadi string kode
+local function serialize(val)
+	if type(val) == "string" then 
+		return '"' .. val .. '"'
+	elseif type(val) == "number" or type(val) == "boolean" then 
+		return tostring(val)
+	elseif typeof(val) == "Instance" then 
+		return getPath(val)
+	elseif type(val) == "table" then
+		local str = "{"
+		local count = 0
+		for k, v in pairs(val) do
+			count = count + 1
+			if type(k) == "string" then
+				str = str .. k .. " = " .. serialize(v) .. ", "
+			else
+				str = str .. "[" .. serialize(k) .. "] = " .. serialize(v) .. ", "
+			end
+		end
+		-- Hapus koma terakhir agar rapi
+		if count > 0 then str = str:sub(1, -3) end
+		return str .. "}"
+	else
+		return "nil --[[" .. typeof(val) .. "]]"
+	end
+end
+
+-- Membajak (Hook) sistem Namecall untuk memantau aktivitas Remote
+local OldNamecall
+OldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
+	local method = getnamecallmethod()
+	
+	-- Pastikan remote dipicu oleh game asli (bukan script executor) dan berupa FireServer/InvokeServer
+	if not checkcaller() and (method == "FireServer" or method == "InvokeServer") then
+		local args = {...}
+		
+		task.spawn(function()
+			local path = getPath(self)
+			local argStr = ""
+			for i, v in ipairs(args) do
+				argStr = argStr .. serialize(v)
+				if i < #args then argStr = argStr .. ", " end
+			end
+			
+			local finalScript = path .. ":" .. method .. "(" .. argStr .. ")"
+			
+			-- 1. Otomatis copy ke clipboard komputer
+			setclipboard(finalScript)
+			-- 2. Print ke console/F9 sebagai backup jika clipboard tertimpa
+			print("[AUTO-COPY TERDETEKSI] " .. finalScript)
+		end)
+	end
+	
+	return OldNamecall(self, ...)
+end)
+
+print("Simple Remote Auto-Copy Aktif! Silakan mati di game dan klik tombol Teleport-nya.")
