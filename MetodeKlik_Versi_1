@@ -1,0 +1,166 @@
+-- ==============================================================================
+-- 🚀 ULTIMATE MASTER SCRIPT V7: SMART CLICK (EDISI SEKALI JALAN / RUN-ONCE)
+-- 💡 Fungsi: Mencari tombol, klik 1x, lalu script otomatis mati. Sangat ringan!
+-- ==============================================================================
+
+-- ------------------------------------------------------------------------------
+-- ⚙️ [CONFIG] PENGATURAN UTAMA
+-- ------------------------------------------------------------------------------
+local Config = {
+    -- 1. Paste Path UI kamu di sini
+    PathTombol = "Players.LOCALPLAYER.PlayerGui.GameGuiNoInset.Screen.Top.WaveControls.TickSpeed.Items.1",
+    
+    -- 2. Gunakan mouse fisik jika proteksi game sangat kuat? (Disarankan: false)
+    GunakanMouseFisik = false 
+}
+
+-- ------------------------------------------------------------------------------
+-- 📦 [BAGIAN 1] LIBRARY SMART CLICK (ANTI-YIELD)
+-- ------------------------------------------------------------------------------
+local VirtualInputManager = game:GetService("VirtualInputManager")
+local SmartClick = {}
+
+function SmartClick.ViaConnections(button)
+    if typeof(getconnections) ~= "function" then return false end
+    local fired = false
+    local signals = {"MouseButton1Click", "Activated", "MouseButton1Down", "MouseButton1Up"}
+    for _, sig in ipairs(signals) do
+        pcall(function()
+            if button[sig] then
+                for _, c in ipairs(getconnections(button[sig])) do
+                    task.spawn(function()
+                        local ok = pcall(function() c:Fire() end)
+                        if not ok and typeof(firesignal) == "function" then
+                            pcall(function() firesignal(c) end)
+                        end
+                    end)
+                    fired = true
+                end
+            end
+        end)
+    end
+    return fired
+end
+
+function SmartClick.ViaFiresignal(button)
+    if typeof(firesignal) ~= "function" then return false end
+    local fired = false
+    local signals = {"MouseButton1Down", "MouseButton1Up", "MouseButton1Click", "Activated"}
+    for _, sig in ipairs(signals) do
+        pcall(function()
+            if button[sig] then 
+                task.spawn(function()
+                    pcall(function() firesignal(button[sig]) end)
+                end)
+                fired = true 
+            end
+        end)
+    end
+    return fired
+end
+
+function SmartClick.ViaVIM(button)
+    if not Config.GunakanMouseFisik then return false end
+    if not VirtualInputManager then return false end
+    
+    return pcall(function()
+        local pos = button.AbsolutePosition
+        local size = button.AbsoluteSize
+        local x = pos.X + (size.X / 2)
+        local y = pos.Y + (size.Y / 2)
+        
+        task.spawn(function()
+            pcall(function()
+                VirtualInputManager:SendMouseButtonEvent(x, y, 0, true, game, 0)
+                task.wait(0.05)
+                VirtualInputManager:SendMouseButtonEvent(x, y, 0, false, game, 0)
+            end)
+        end)
+    end)
+end
+
+function SmartClick.Execute(button, maxRetries, gap)
+    maxRetries = maxRetries or 3
+    gap = gap or 0.15
+    if not button then return false end
+    
+    local targets = { button }
+    local title = button:FindFirstChild("Title")
+    if title and (title:IsA("TextLabel") or title:IsA("ImageLabel") or title:IsA("TextButton")) then
+        table.insert(targets, title)
+    end
+
+    for attempt = 1, maxRetries do
+        for _, t in ipairs(targets) do
+            if attempt == 1 then
+                SmartClick.ViaConnections(t)
+                SmartClick.ViaFiresignal(t)
+            elseif attempt == 2 then
+                SmartClick.ViaFiresignal(t)
+                SmartClick.ViaVIM(t)
+            else
+                SmartClick.ViaVIM(t)
+                SmartClick.ViaConnections(t)
+                SmartClick.ViaFiresignal(t)
+            end
+        end
+        
+        if attempt < maxRetries then task.wait(gap) end
+    end
+    
+    return true 
+end
+
+-- ------------------------------------------------------------------------------
+-- 🧠 [BAGIAN 2] AUTO-PATH DECODER 
+-- ------------------------------------------------------------------------------
+local function DecodePathToObject(pathString)
+    if string.sub(pathString, -6) == ".Title" then
+        pathString = string.sub(pathString, 1, -7)
+    end
+
+    local parts = string.split(pathString, ".")
+    local currentObj = game
+    
+    for i, part in ipairs(parts) do
+        if part == "LOCALPLAYER" or part == game.Players.LocalPlayer.Name then
+            currentObj = game.Players.LocalPlayer
+        elseif part == "Players" and i == 1 then
+            currentObj = game:GetService("Players")
+        else
+            if currentObj then
+                currentObj = currentObj:WaitForChild(part, 3) 
+            end
+        end
+        if not currentObj then return nil end
+    end
+    
+    return currentObj
+end
+
+-- ------------------------------------------------------------------------------
+-- 🎯 [BAGIAN 3] EKSEKUSI SEKALI JALAN (RUN-ONCE)
+-- ------------------------------------------------------------------------------
+print("[Run-Once Script] Memulai pencarian rute UI...")
+
+local targetButton = DecodePathToObject(Config.PathTombol)
+
+if targetButton then
+    -- Fitur Pintar: Tunggu maksimal 10 detik kalau UI-nya masih loading/belum kelihatan
+    local timeout = 10
+    local elapsed = 0
+    while not targetButton.Visible and elapsed < timeout do
+        task.wait(0.5)
+        elapsed = elapsed + 0.5
+    end
+
+    if targetButton.Visible then
+        print("[Run-Once Script] Tombol terlihat! Mengeksekusi SmartClick 1x...")
+        SmartClick.Execute(targetButton, 3, 0.15)
+        print("[Run-Once Script] Tugas selesai. Script otomatis mati.")
+    else
+        warn("[Run-Once Script] Batal: Tombol ditemukan tapi tidak muncul di layar (Visible = false).")
+    end
+else
+    warn("[Run-Once Script] Batal: Gagal menemukan rute tombol (Path salah/hilang).")
+end
