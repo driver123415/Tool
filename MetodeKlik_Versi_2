@@ -1,0 +1,221 @@
+-- ==============================================================================
+-- 🚀 ULTIMATE MASTER SCRIPT V8: SMART CLICK (RUN-ONCE + DINAMIS / UUID ACAK)
+-- 💡 Fungsi: Menunggu notif UUID, klik 1x, lalu script memutus koneksi dan MATI.
+-- ==============================================================================
+
+-- ------------------------------------------------------------------------------
+-- ⚙️ [CONFIG] TINGGAL PASTE PATH DI SINI
+-- ------------------------------------------------------------------------------
+local Config = {
+    -- 1. Path Induk (Tempat notifikasi UUID acak itu muncul)
+    PathFolderInduk = "Players.LOCALPLAYER.PlayerGui.Re:NotifyClient",
+    
+    -- 2. Teks validasi agar script tahu ini UI yang benar
+    CiriKhasTeks = "Match still in progress",
+    
+    -- 3. Path Lanjutan (Rute DARI folder UUID menuju ke tombolnya)
+    PathLanjutan = "Options.Accept",
+    
+    -- 4. Batas Waktu Menunggu (dalam detik). 
+    -- Jika dalam sekian detik notifikasi tidak muncul, script otomatis mati.
+    TimeoutPencarian = 60,
+    
+    -- 5. Gunakan mouse fisik? (Disarankan: false)
+    GunakanMouseFisik = false
+}
+
+-- ------------------------------------------------------------------------------
+-- 📦 [BAGIAN 1] LIBRARY SMART CLICK (ANTI-YIELD)
+-- ------------------------------------------------------------------------------
+local VirtualInputManager = game:GetService("VirtualInputManager")
+local SmartClick = {}
+
+function SmartClick.ViaConnections(button)
+    if typeof(getconnections) ~= "function" then return false end
+    local fired = false
+    local signals = {"MouseButton1Click", "Activated", "MouseButton1Down", "MouseButton1Up"}
+    for _, sig in ipairs(signals) do
+        pcall(function()
+            if button[sig] then
+                for _, c in ipairs(getconnections(button[sig])) do
+                    task.spawn(function()
+                        local ok = pcall(function() c:Fire() end)
+                        if not ok and typeof(firesignal) == "function" then
+                            pcall(function() firesignal(c) end)
+                        end
+                    end)
+                    fired = true
+                end
+            end
+        end)
+    end
+    return fired
+end
+
+function SmartClick.ViaFiresignal(button)
+    if typeof(firesignal) ~= "function" then return false end
+    local fired = false
+    local signals = {"MouseButton1Down", "MouseButton1Up", "MouseButton1Click", "Activated"}
+    for _, sig in ipairs(signals) do
+        pcall(function()
+            if button[sig] then 
+                task.spawn(function()
+                    pcall(function() firesignal(button[sig]) end)
+                end)
+                fired = true 
+            end
+        end)
+    end
+    return fired
+end
+
+function SmartClick.ViaVIM(button)
+    if not Config.GunakanMouseFisik then return false end
+    if not VirtualInputManager then return false end
+    
+    return pcall(function()
+        local pos = button.AbsolutePosition
+        local size = button.AbsoluteSize
+        local x = pos.X + (size.X / 2)
+        local y = pos.Y + (size.Y / 2)
+        
+        task.spawn(function()
+            pcall(function()
+                VirtualInputManager:SendMouseButtonEvent(x, y, 0, true, game, 0)
+                task.wait(0.05)
+                VirtualInputManager:SendMouseButtonEvent(x, y, 0, false, game, 0)
+            end)
+        end)
+    end)
+end
+
+function SmartClick.Execute(button, maxRetries, gap)
+    maxRetries = maxRetries or 3
+    gap = gap or 0.15
+    if not button then return false end
+    
+    local targets = { button }
+    local title = button:FindFirstChild("Title")
+    if title and (title:IsA("TextLabel") or title:IsA("ImageLabel") or title:IsA("TextButton")) then
+        table.insert(targets, title)
+    end
+
+    for attempt = 1, maxRetries do
+        for _, t in ipairs(targets) do
+            if attempt == 1 then
+                SmartClick.ViaConnections(t)
+                SmartClick.ViaFiresignal(t)
+            elseif attempt == 2 then
+                SmartClick.ViaFiresignal(t)
+                SmartClick.ViaVIM(t)
+            else
+                SmartClick.ViaVIM(t)
+                SmartClick.ViaConnections(t)
+                SmartClick.ViaFiresignal(t)
+            end
+        end
+        if attempt < maxRetries then task.wait(gap) end
+    end
+    return true
+end
+
+-- ------------------------------------------------------------------------------
+-- 🧠 [BAGIAN 2] AUTO-PATH DECODER & RELATIVE DECODER
+-- ------------------------------------------------------------------------------
+local function DecodePathToObject(pathString)
+    local parts = string.split(pathString, ".")
+    local currentObj = game
+    
+    for i, part in ipairs(parts) do
+        if part == "LOCALPLAYER" or part == game.Players.LocalPlayer.Name then
+            currentObj = game.Players.LocalPlayer
+        elseif part == "Players" and i == 1 then
+            currentObj = game:GetService("Players")
+        else
+            if currentObj then currentObj = currentObj:WaitForChild(part, 10) end
+        end
+        if not currentObj then return nil end
+    end
+    return currentObj
+end
+
+local function DecodeRelativePath(parentObj, relativePath)
+    if string.sub(relativePath, -6) == ".Title" then
+        relativePath = string.sub(relativePath, 1, -7)
+    end
+    
+    local parts = string.split(relativePath, ".")
+    local currentObj = parentObj
+    
+    for _, part in ipairs(parts) do
+        if currentObj then
+            currentObj = currentObj:WaitForChild(part, 5)
+        end
+        if not currentObj then return nil end
+    end
+    return currentObj
+end
+
+-- ------------------------------------------------------------------------------
+-- 🎯 [BAGIAN 3] EKSEKUSI RADAR (RUN-ONCE & BUNUH DIRI)
+-- ------------------------------------------------------------------------------
+print("[Run-Once Dinamis] Mencari folder induk notifikasi...")
+
+local folderInduk = DecodePathToObject(Config.PathFolderInduk)
+local radarConnection = nil
+local sudahSelesai = false
+
+-- Fungsi memproses notifikasi
+local function prosesNotifikasi(child)
+    if sudahSelesai then return end -- Cegah eksekusi ganda
+    
+    task.wait(0.5) -- Render wait
+    
+    local label = child:FindFirstChild("Label")
+    if label and label:IsA("TextLabel") and label.Text == Config.CiriKhasTeks then
+        print("[Run-Once Dinamis] UUID Terdeteksi (" .. child.Name .. ")! Menyiapkan klik...")
+        
+        local tombolTarget = DecodeRelativePath(child, Config.PathLanjutan)
+        
+        if tombolTarget then
+            SmartClick.Execute(tombolTarget, 3, 0.15)
+            print("[Run-Once Dinamis] Eksekusi selesai! Mematikan radar script...")
+        else
+            warn("[Run-Once Dinamis] Gagal menemukan tombol di dalam folder UUID.")
+        end
+        
+        -- KUNCI RUN-ONCE: Putus koneksi dan tandai selesai agar script musnah
+        sudahSelesai = true
+        if radarConnection then 
+            radarConnection:Disconnect() 
+            radarConnection = nil
+        end
+    end
+end
+
+if folderInduk then
+    -- 1. Cek barangkali UI notifikasinya SUDAH ADA sebelum script dieksekusi
+    for _, child in ipairs(folderInduk:GetChildren()) do
+        task.spawn(prosesNotifikasi, child)
+    end
+    
+    -- 2. Jika belum ada, pasang Radar (ChildAdded)
+    if not sudahSelesai then
+        print("[Run-Once Dinamis] Radar aktif! Menunggu maksimal " .. Config.TimeoutPencarian .. " detik...")
+        radarConnection = folderInduk.ChildAdded:Connect(prosesNotifikasi)
+        
+        -- 3. Sistem Timeout (Bunuh Diri jika notif tidak datang-datang)
+        task.delay(Config.TimeoutPencarian, function()
+            if not sudahSelesai then
+                sudahSelesai = true
+                if radarConnection then 
+                    radarConnection:Disconnect() 
+                    radarConnection = nil
+                end
+                print("[Run-Once Dinamis] Timeout! Notifikasi tidak muncul. Script otomatis dimatikan.")
+            end
+        end)
+    end
+else
+    warn("[Run-Once Dinamis] Batal: Folder induk gagal ditemukan.")
+end
