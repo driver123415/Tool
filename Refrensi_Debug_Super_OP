@@ -1,0 +1,60 @@
+-- paste and run DURING the minigame when hands are visible
+local Players = game:GetService("Players")
+local PlayerGui = Players.LocalPlayer:WaitForChild("PlayerGui")
+
+local function SpyButton(btn)
+	print("=== SPYING:", btn:GetFullName(), "===")
+	print("Class:", btn.ClassName)
+	print("Active:", btn.Active)
+	print("Modal:", btn.Modal)
+	
+	-- check every signal for live connections
+	local signals = {
+		"MouseButton1Click", "MouseButton1Down", "MouseButton1Up",
+		"Activated", "InputBegan", "InputEnded", "TouchTap",
+		"SelectionGained", "MouseEnter"
+	}
+	
+	for _, sig in ipairs(signals) do
+		pcall(function()
+			local conns = getconnections(btn[sig])
+			if #conns > 0 then
+				print("  [SIGNAL]", sig, "has", #conns, "connections")
+				for i, c in ipairs(conns) do
+					print("    conn", i, "enabled:", c.Enabled)
+					-- try to get the script source
+					pcall(function() print("    func:", c.Function) end)
+				end
+			end
+		end)
+	end
+	
+	-- also check parent chain
+	print("  [PARENTS]")
+	local obj = btn.Parent
+	while obj do
+		print("   ", obj.ClassName, obj.Name)
+		obj = obj.Parent
+	end
+end
+
+-- watch for Template buttons spawning
+local minigame = PlayerGui:FindFirstChild("Minigame")
+if minigame then
+	local frame = minigame:FindFirstChild("Frame")
+	if frame then
+		frame.ChildAdded:Connect(function(child)
+			task.wait(0.05)
+			if child.Name == "Template" then
+				SpyButton(child)
+				-- also spy any ImageButton inside
+				for _, d in ipairs(child:GetDescendants()) do
+					if d:IsA("ImageButton") or d:IsA("TextButton") then
+						SpyButton(d)
+					end
+				end
+			end
+		end)
+		print("watching for Template... start the minigame")
+	end
+end
