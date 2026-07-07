@@ -1,4 +1,4 @@
---!native simplespy anti spam remote edited jika spam langsung auto exclude - bisa geser geser + Prximity detected
+--!native simplespy anti spam remote edited jika spam langsung auto exclude - bisa geser geser keluar layar + proximity detected
 --50/50 this breaks but it's a beta for a reason!
 
 if getgenv().SimpleSpyExecuted and type(getgenv().SimpleSpyShutdown) == "function" then
@@ -220,8 +220,21 @@ function ErrorPrompt(Message,state)
     end
 end
 
-local Highlight = (isfile and loadfile and isfile("Highlight.lua") and loadfile("Highlight.lua")()) or loadstring(game:HttpGet("https://raw.githubusercontent.com/78n/SimpleSpy/main/Highlight.lua"))()
-local LazyFix = loadstring(game:HttpGet("https://raw.githubusercontent.com/78n/Roblox/refs/heads/main/Lua/Libraries/DataToCode/DataToCode.luau"))() -- Very lazy fix as I'm legit just pasting it from the rewrite
+-- =========================================================
+-- CACHING SYSTEM (ANTI HTTP 429 TOO MANY REQUESTS)
+-- Jika script dieksekusi ulang, tidak perlu download lagi
+-- =========================================================
+if not getgenv().SimpleSpyHighlightCache then
+    getgenv().SimpleSpyHighlightCache = (isfile and loadfile and isfile("Highlight.lua") and loadfile("Highlight.lua")()) or loadstring(game:HttpGet("https://raw.githubusercontent.com/78n/SimpleSpy/main/Highlight.lua"))()
+end
+local Highlight = getgenv().SimpleSpyHighlightCache
+
+if not getgenv().SimpleSpyLazyFixCache then
+    getgenv().SimpleSpyLazyFixCache = loadstring(game:HttpGet("https://raw.githubusercontent.com/78n/Roblox/refs/heads/main/Lua/Libraries/DataToCode/DataToCode.luau"))()
+end
+local LazyFix = getgenv().SimpleSpyLazyFixCache
+-- =========================================================
+
 
 local SimpleSpy3 = Create("ScreenGui",{ResetOnSpawn = false})
 local Storage = Create("Folder",{})
@@ -1439,7 +1452,7 @@ function i2p(i,customgen)
                     out = ':WaitForChild("' .. parent.Name .. '")'..out
                 end
             end
-            if i:IsDescendantOf(Players.LocalPlayer) then
+            if typeof(i) == "Instance" and i:IsDescendantOf(Players.LocalPlayer) then
                 return 'game:GetService("Players").LocalPlayer'..out
             end
             parent = parent.Parent
@@ -1453,7 +1466,7 @@ end
 --- Gets the player an instance is descended from
 function getplayer(instance)
     for _, v in next, Players:GetPlayers() do
-        if v.Character and (instance:IsDescendantOf(v.Character) or instance == v.Character) then
+        if v.Character and (typeof(instance) == "Instance" and (instance:IsDescendantOf(v.Character) or instance == v.Character)) then
             return v
         end
     end
@@ -1938,11 +1951,17 @@ if not getgenv().SimpleSpyExecuted then
         if not hookmetamethod then
             ErrorPrompt("Simple Spy V3 will not function to it's fullest capablity due to your executor not supporting hookmetamethod.",true)
         end
+        
+        -- [MODIFIED: UpdateLog Cache]
         codebox = Highlight.new(CodeBox)
         logthread(spawn(function()
-            local suc,err = pcall(game.HttpGet,game,"https://raw.githubusercontent.com/78n/SimpleSpy/main/UpdateLog.lua")
-            codebox:setRaw((suc and err) or "")
+            if not getgenv().SimpleSpyUpdateLogCache then
+                local suc,err = pcall(game.HttpGet,game,"https://raw.githubusercontent.com/78n/SimpleSpy/main/UpdateLog.lua")
+                getgenv().SimpleSpyUpdateLogCache = (suc and err) or ""
+            end
+            codebox:setRaw(getgenv().SimpleSpyUpdateLogCache)
         end))
+        
         getgenv().SimpleSpy = SimpleSpy
         getgenv().getNil = function(name,class)
             for _,v in next, getnilinstances() do
