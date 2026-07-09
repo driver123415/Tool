@@ -1,0 +1,714 @@
+-- ==========================================================
+-- 🔬 UNIVERSAL DEBUGGER V1 — AXIOM EDITION (PERFECTED)
+-- works on any roblox game, no hardcoded IDs
+-- ==========================================================
+local Players = game:GetService("Players")
+local GuiService = game:GetService("GuiService")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+
+local Player = Players.LocalPlayer
+local PlayerGui = Player:WaitForChild("PlayerGui")
+local guiParent = (gethui and gethui()) or game:GetService("CoreGui") or PlayerGui
+
+-- CLEANUP
+for _, n in ipairs({"AxiomDebugger","AxiomDots"}) do
+	if guiParent:FindFirstChild(n) then guiParent:FindFirstChild(n):Destroy() end
+end
+
+local connections = {}
+local isActive = true
+local logLines = {}
+local logOrder = 0
+local trackedButtons = {}
+local watchedGuis = {}
+local autoClickEnabled = false
+local autoClickTargets = {}
+local totalClicked = 0
+local totalSeen = 0
+local totalSkipped = 0
+
+-- ==========================================
+-- DOT LAYER
+-- ==========================================
+local dotsGui = Instance.new("ScreenGui")
+dotsGui.Name = "AxiomDots"
+dotsGui.IgnoreGuiInset = true
+dotsGui.DisplayOrder = 9999
+dotsGui.Parent = guiParent
+
+local function MakeDot(target, color, label)
+	if not target then return end
+	local ok, pos = pcall(function() return target.AbsolutePosition end)
+	if not ok then return end
+	local size = target.AbsoluteSize
+	local inset = GuiService:GetGuiInset()
+	local x = pos.X + size.X / 2
+	local y = pos.Y + size.Y / 2 + inset.Y
+
+	local dot = Instance.new("Frame")
+	dot.Size = UDim2.new(0, 18, 0, 18)
+	dot.AnchorPoint = Vector2.new(0.5, 0.5)
+	dot.Position = UDim2.new(0, x, 0, y)
+	dot.BackgroundColor3 = color
+	dot.ZIndex = 20
+	dot.BorderSizePixel = 0
+	pcall(function() dot.Active = false end)
+	Instance.new("UICorner", dot).CornerRadius = UDim.new(1, 0)
+	dot.Parent = dotsGui
+
+	if label then
+		local lbl = Instance.new("TextLabel", dot)
+		lbl.Size = UDim2.new(0, 60, 0, 14)
+		lbl.Position = UDim2.new(1, 4, 0.5, -7)
+		lbl.BackgroundColor3 = Color3.fromRGB(0,0,0)
+		lbl.BackgroundTransparency = 0.4
+		lbl.TextColor3 = Color3.fromRGB(255,255,255)
+		lbl.Font = Enum.Font.Code
+		lbl.TextSize = 9
+		lbl.Text = label
+		lbl.TextXAlignment = Enum.TextXAlignment.Left
+		Instance.new("UICorner", lbl).CornerRadius = UDim.new(0, 3)
+	end
+
+	task.delay(2, function() if dot and dot.Parent then dot:Destroy() end end)
+	return x, y
+end
+
+-- ==========================================
+-- GUI BUILD
+-- ==========================================
+local Screen = Instance.new("ScreenGui", guiParent)
+Screen.Name = "AxiomDebugger"
+Screen.ResetOnSpawn = false
+Screen.DisplayOrder = 9998 -- Supaya tampil di depan UI game
+
+local Main = Instance.new("Frame", Screen)
+Main.Size = UDim2.new(0, 420, 0, 500)
+Main.Position = UDim2.new(0, 10, 0, 10)
+Main.BackgroundColor3 = Color3.fromRGB(12, 12, 16)
+Main.BorderSizePixel = 0
+Main.ClipsDescendants = true -- FIX: Agar elemen tersembunyi saat diminimize
+Instance.new("UICorner", Main).CornerRadius = UDim.new(0, 10)
+
+-- titlebar
+local TitleBar = Instance.new("Frame", Main)
+TitleBar.Size = UDim2.new(1, 0, 0, 32)
+TitleBar.BackgroundColor3 = Color3.fromRGB(6, 6, 10)
+TitleBar.BorderSizePixel = 0
+TitleBar.Active = true
+Instance.new("UICorner", TitleBar).CornerRadius = UDim.new(0, 10)
+
+local TitleLbl = Instance.new("TextLabel", TitleBar)
+TitleLbl.Size = UDim2.new(1, -70, 1, 0)
+TitleLbl.Position = UDim2.new(0, 10, 0, 0)
+TitleLbl.BackgroundTransparency = 1
+TitleLbl.Text = "🔬 Axiom Universal Debugger V1"
+TitleLbl.TextColor3 = Color3.fromRGB(180, 180, 255)
+TitleLbl.Font = Enum.Font.GothamBold
+TitleLbl.TextSize = 12
+TitleLbl.TextXAlignment = Enum.TextXAlignment.Left
+
+local CloseBtn = Instance.new("TextButton", TitleBar)
+CloseBtn.Size = UDim2.new(0, 26, 0, 22)
+CloseBtn.Position = UDim2.new(1, -30, 0, 5)
+CloseBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+CloseBtn.Text = "X"
+CloseBtn.TextColor3 = Color3.fromRGB(255,255,255)
+CloseBtn.Font = Enum.Font.GothamBold
+CloseBtn.TextSize = 11
+Instance.new("UICorner", CloseBtn).CornerRadius = UDim.new(0, 4)
+
+local MinBtn = Instance.new("TextButton", TitleBar)
+MinBtn.Size = UDim2.new(0, 26, 0, 22)
+MinBtn.Position = UDim2.new(1, -58, 0, 5)
+MinBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 80)
+MinBtn.Text = "—"
+MinBtn.TextColor3 = Color3.fromRGB(200,200,200)
+MinBtn.Font = Enum.Font.GothamBold
+MinBtn.TextSize = 11
+Instance.new("UICorner", MinBtn).CornerRadius = UDim.new(0, 4)
+
+-- stats row
+local StatsRow = Instance.new("Frame", Main)
+StatsRow.Size = UDim2.new(1, -20, 0, 44)
+StatsRow.Position = UDim2.new(0, 10, 0, 40)
+StatsRow.BackgroundColor3 = Color3.fromRGB(18, 18, 26)
+StatsRow.BorderSizePixel = 0
+Instance.new("UICorner", StatsRow).CornerRadius = UDim.new(0, 6)
+local StatsLayout = Instance.new("UIListLayout", StatsRow)
+StatsLayout.FillDirection = Enum.FillDirection.Horizontal
+StatsLayout.Padding = UDim.new(0, 1)
+
+local function StatBox(color, startText)
+	local f = Instance.new("Frame", StatsRow)
+	f.Size = UDim2.new(0.333, 0, 1, 0)
+	f.BackgroundTransparency = 1
+	local lbl = Instance.new("TextLabel", f)
+	lbl.Size = UDim2.new(1, 0, 1, 0)
+	lbl.BackgroundTransparency = 1
+	lbl.TextColor3 = color
+	lbl.Font = Enum.Font.GothamBold
+	lbl.TextSize = 11
+	lbl.Text = startText
+	return lbl
+end
+
+local SeenLbl    = StatBox(Color3.fromRGB(180,180,255), "👁 Seen: 0")
+local ClickedLbl = StatBox(Color3.fromRGB(80,255,120),  "✅ Clicked: 0")
+local SkippedLbl = StatBox(Color3.fromRGB(255,100,100), "💀 Skipped: 0")
+
+-- status pill
+local StatusPill = Instance.new("Frame", Main)
+StatusPill.Size = UDim2.new(1, -20, 0, 24)
+StatusPill.Position = UDim2.new(0, 10, 0, 92)
+StatusPill.BackgroundColor3 = Color3.fromRGB(20, 20, 35)
+StatusPill.BorderSizePixel = 0
+Instance.new("UICorner", StatusPill).CornerRadius = UDim.new(0, 6)
+
+local StatusLbl = Instance.new("TextLabel", StatusPill)
+StatusLbl.Size = UDim2.new(1, -8, 1, 0)
+StatusLbl.Position = UDim2.new(0, 6, 0, 0)
+StatusLbl.BackgroundTransparency = 1
+StatusLbl.Text = "⏳ Scanning all GUIs..."
+StatusLbl.TextColor3 = Color3.fromRGB(160, 160, 220)
+StatusLbl.Font = Enum.Font.GothamSemibold
+StatusLbl.TextSize = 11
+StatusLbl.TextXAlignment = Enum.TextXAlignment.Left
+
+-- image ID tracker
+local IdPill = Instance.new("Frame", Main)
+IdPill.Size = UDim2.new(1, -20, 0, 20)
+IdPill.Position = UDim2.new(0, 10, 0, 124)
+IdPill.BackgroundColor3 = Color3.fromRGB(16, 20, 16)
+IdPill.BorderSizePixel = 0
+Instance.new("UICorner", IdPill).CornerRadius = UDim.new(0, 6)
+
+local IdLbl = Instance.new("TextLabel", IdPill)
+IdLbl.Size = UDim2.new(1, -8, 1, 0)
+IdLbl.Position = UDim2.new(0, 4, 0, 0)
+IdLbl.BackgroundTransparency = 1
+IdLbl.Text = "🖼 Last img: —"
+IdLbl.TextColor3 = Color3.fromRGB(120, 220, 120)
+IdLbl.Font = Enum.Font.Code
+IdLbl.TextSize = 9
+IdLbl.TextXAlignment = Enum.TextXAlignment.Left
+IdLbl.TextTruncate = Enum.TextTruncate.AtEnd
+
+-- log box
+local LogBox = Instance.new("ScrollingFrame", Main)
+LogBox.Size = UDim2.new(1, -20, 0, 220)
+LogBox.Position = UDim2.new(0, 10, 0, 152)
+LogBox.BackgroundColor3 = Color3.fromRGB(8, 8, 12)
+LogBox.BorderSizePixel = 0
+LogBox.ScrollBarThickness = 3
+LogBox.CanvasSize = UDim2.new(0,0,0,0)
+LogBox.AutomaticCanvasSize = Enum.AutomaticSize.Y
+LogBox.ScrollingDirection = Enum.ScrollingDirection.Y
+Instance.new("UICorner", LogBox).CornerRadius = UDim.new(0, 6)
+
+local LogLayout = Instance.new("UIListLayout", LogBox)
+LogLayout.Padding = UDim.new(0, 1)
+LogLayout.SortOrder = Enum.SortOrder.LayoutOrder
+
+local LogPad = Instance.new("UIPadding", LogBox)
+LogPad.PaddingLeft = UDim.new(0, 5)
+LogPad.PaddingTop = UDim.new(0, 3)
+
+-- bottom buttons
+local BtnRow = Instance.new("Frame", Main)
+BtnRow.Size = UDim2.new(1, -20, 0, 26)
+BtnRow.Position = UDim2.new(0, 10, 0, 380)
+BtnRow.BackgroundTransparency = 1
+local BtnLayout = Instance.new("UIListLayout", BtnRow)
+BtnLayout.FillDirection = Enum.FillDirection.Horizontal
+BtnLayout.Padding = UDim.new(0, 6)
+
+local function MakeBtn(text, bgColor, w)
+	local btn = Instance.new("TextButton", BtnRow)
+	btn.Size = UDim2.new(0, w, 1, 0)
+	btn.BackgroundColor3 = bgColor
+	btn.Text = text
+	btn.TextColor3 = Color3.fromRGB(255,255,255)
+	btn.Font = Enum.Font.GothamBold
+	btn.TextSize = 10
+	btn.BorderSizePixel = 0
+	Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 5)
+	return btn
+end
+
+-- FIX: Menyesuaikan ukuran tombol agar totalnya pas dan tidak meluber dari frame utama (Max 400px dgn padding)
+local ClearBtn   = MakeBtn("🧹 Clear",   Color3.fromRGB(35,35,50), 65)
+local CopyBtn    = MakeBtn("📋 Copy",    Color3.fromRGB(30,50,30), 65)
+local SpyBtn     = MakeBtn("🕵 Spy All", Color3.fromRGB(50,30,60), 75)
+local AutoBtn    = MakeBtn("▶ AutoClick",Color3.fromRGB(30,80,30), 85)
+local DumpBtn    = MakeBtn("📦 Dump GUI",Color3.fromRGB(50,40,20), 85)
+
+-- auto-click id input
+local InputRow = Instance.new("Frame", Main)
+InputRow.Size = UDim2.new(1, -20, 0, 26)
+InputRow.Position = UDim2.new(0, 10, 0, 414)
+InputRow.BackgroundColor3 = Color3.fromRGB(18, 18, 26)
+InputRow.BorderSizePixel = 0
+Instance.new("UICorner", InputRow).CornerRadius = UDim.new(0, 6)
+
+local InputLbl = Instance.new("TextLabel", InputRow)
+InputLbl.Size = UDim2.new(0, 80, 1, 0)
+InputLbl.BackgroundTransparency = 1
+InputLbl.Text = "🎯 Click ID:"
+InputLbl.TextColor3 = Color3.fromRGB(160,160,200)
+InputLbl.Font = Enum.Font.GothamSemibold
+InputLbl.TextSize = 10
+
+local InputBox = Instance.new("TextBox", InputRow)
+InputBox.Size = UDim2.new(1, -90, 1, -4)
+InputBox.Position = UDim2.new(0, 82, 0, 2)
+InputBox.BackgroundColor3 = Color3.fromRGB(25,25,40)
+InputBox.BorderSizePixel = 0
+InputBox.Text = ""
+InputBox.PlaceholderText = "rbxassetid://... (paste image ID to auto-click)"
+InputBox.TextColor3 = Color3.fromRGB(200,255,200)
+InputBox.Font = Enum.Font.Code
+InputBox.TextSize = 9
+InputBox.ClearTextOnFocus = false
+Instance.new("UICorner", InputBox).CornerRadius = UDim.new(0, 4)
+
+-- method display
+local MethodPill = Instance.new("Frame", Main)
+MethodPill.Size = UDim2.new(1, -20, 0, 20)
+MethodPill.Position = UDim2.new(0, 10, 0, 448)
+MethodPill.BackgroundColor3 = Color3.fromRGB(16, 16, 26)
+MethodPill.BorderSizePixel = 0
+Instance.new("UICorner", MethodPill).CornerRadius = UDim.new(0, 6)
+
+local MethodLbl = Instance.new("TextLabel", MethodPill)
+MethodLbl.Size = UDim2.new(1, -8, 1, 0)
+MethodLbl.Position = UDim2.new(0, 4, 0, 0)
+MethodLbl.BackgroundTransparency = 1
+MethodLbl.Text = "🔌 Click method: detecting..."
+MethodLbl.TextColor3 = Color3.fromRGB(140,180,255)
+MethodLbl.Font = Enum.Font.GothamSemibold
+MethodLbl.TextSize = 10
+MethodLbl.TextXAlignment = Enum.TextXAlignment.Left
+
+-- ==========================================
+-- FIX: CUSTOM DRAGGING LOGIC (Smooth & Anti-Bug)
+-- ==========================================
+local dragging
+local dragInput
+local dragStart
+local startPos
+
+TitleBar.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+		dragging = true
+		dragStart = input.Position
+		startPos = Main.Position
+		
+		input.Changed:Connect(function()
+			if input.UserInputState == Enum.UserInputState.End then
+				dragging = false
+			end
+		end)
+	end
+end)
+
+TitleBar.InputChanged:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+		dragInput = input
+	end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+	if input == dragInput and dragging then
+		local delta = input.Position - dragStart
+		Main.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+	end
+end)
+
+-- minimize state
+local minimized = false
+local fullHeight = 500
+MinBtn.MouseButton1Click:Connect(function()
+	minimized = not minimized
+	Main.Size = minimized and UDim2.new(0, 420, 0, 32) or UDim2.new(0, 420, 0, fullHeight)
+	MinBtn.Text = minimized and "□" or "—"
+end)
+
+-- ==========================================
+-- LOGGING
+-- ==========================================
+local function AddLog(msg, color)
+	if not isActive then return end
+	logOrder += 1
+	local lbl = Instance.new("TextLabel")
+	lbl.Size = UDim2.new(1, -6, 0, 12)
+	lbl.BackgroundTransparency = 1
+	lbl.Text = msg
+	lbl.TextColor3 = color or Color3.fromRGB(160,160,160)
+	lbl.Font = Enum.Font.Code
+	lbl.TextSize = 9
+	lbl.TextXAlignment = Enum.TextXAlignment.Left
+	lbl.TextTruncate = Enum.TextTruncate.AtEnd
+	lbl.LayoutOrder = logOrder
+	lbl.Parent = LogBox
+	table.insert(logLines, lbl)
+	task.defer(function() LogBox.CanvasPosition = Vector2.new(0, math.huge) end)
+end
+
+local function SetStatus(msg, r, g, b)
+	StatusLbl.Text = msg
+	StatusPill.BackgroundColor3 = Color3.fromRGB(r or 20, g or 20, b or 35)
+end
+
+-- ==========================================
+-- CLICK ENGINE
+-- ==========================================
+local detectedMethod = nil
+local function FireButton(button)
+	pcall(function() button.Active = true end)
+	local method = "none"
+
+	if typeof(getconnections) == "function" then
+		local fired = false
+		pcall(function()
+			for _, c in ipairs(getconnections(button.MouseButton1Down)) do
+				task.spawn(function() pcall(function() c:Fire() end) end)
+				fired = true
+			end
+			task.wait(0.04)
+			for _, c in ipairs(getconnections(button.Activated)) do
+				task.spawn(function() pcall(function() c:Fire() end) end)
+				fired = true
+			end
+			for _, c in ipairs(getconnections(button.MouseButton1Click)) do
+				task.spawn(function() pcall(function() c:Fire() end) end)
+			end
+		end)
+		if fired then method = "getconn" end
+	end
+
+	if method == "none" and typeof(firesignal) == "function" then
+		pcall(function()
+			firesignal(button.MouseButton1Down)
+			task.wait(0.04)
+			firesignal(button.Activated)
+			firesignal(button.MouseButton1Click)
+		end)
+		method = "firesignal"
+	end
+
+	if method == "none" and typeof(firebutton) == "function" then
+		pcall(function() firebutton(button, "") end)
+		method = "firebutton"
+	end
+
+	if method == "none" then
+		local ok, pos = pcall(function() return button.AbsolutePosition end)
+		if ok then
+			local size = button.AbsoluteSize
+			local inset = GuiService:GetGuiInset()
+			local x = pos.X + size.X / 2
+			local y = pos.Y + size.Y / 2 + inset.Y
+			pcall(function()
+				VirtualInputManager:SendMouseButtonEvent(x, y, 0, true, game, 0)
+				task.wait(0.05)
+				VirtualInputManager:SendMouseButtonEvent(x, y, 0, false, game, 0)
+			end)
+			method = "VIM"
+		end
+	end
+
+	pcall(function() button.Active = false end)
+	detectedMethod = method
+	MethodLbl.Text = "🔌 Click method: " .. method
+	return method
+end
+
+-- ==========================================
+-- SPY & SCAN ENGINE
+-- ==========================================
+local function SpyElement(obj, prefix)
+	prefix = prefix or ""
+	local signals = {
+		"MouseButton1Click","MouseButton1Down","MouseButton1Up",
+		"Activated","InputBegan","InputEnded","MouseEnter","TouchTap"
+	}
+	local hasAny = false
+	if typeof(getconnections) == "function" then
+		for _, sig in ipairs(signals) do
+			pcall(function()
+				local conns = getconnections(obj[sig])
+				if #conns > 0 then
+					AddLog(prefix.."["..sig.."] "..#conns.." conn(s)", Color3.fromRGB(140,220,255))
+					hasAny = true
+				end
+			end)
+		end
+	end
+	if not hasAny then
+		AddLog(prefix.."no signals found (Active="..tostring(obj.Active)..")", Color3.fromRGB(180,100,100))
+	end
+end
+
+local function DeepScan(root, depth)
+	depth = depth or 0
+	if depth > 8 then return end
+	local results = {images={}, buttons={}}
+
+	local function check(obj)
+		if obj:IsA("ImageLabel") or obj:IsA("ImageButton") then
+			if obj.Image ~= "" then
+				table.insert(results.images, {obj=obj, img=obj.Image, vis=obj.Visible})
+				IdLbl.Text = "🖼 " .. obj.Image
+			end
+		end
+		if obj:IsA("ImageButton") or obj:IsA("TextButton") then
+			table.insert(results.buttons, obj)
+		end
+	end
+
+	check(root)
+	for _, d in ipairs(root:GetDescendants()) do check(d) end
+	return results
+end
+
+local function DumpObject(obj, indent)
+	indent = indent or 0
+	local pad = string.rep("  ", indent)
+	local info = obj.ClassName .. " '" .. obj.Name .. "'"
+
+	if obj:IsA("ImageLabel") or obj:IsA("ImageButton") then
+		info = info .. " img=[" .. obj.Image .. "] vis=" .. tostring(obj.Visible)
+	elseif obj:IsA("TextLabel") or obj:IsA("TextButton") then
+		info = info .. " txt=[" .. obj.Text .. "]"
+	end
+
+	AddLog(pad .. info, Color3.fromRGB(160, 160, 100))
+
+	if indent < 5 then
+		for _, child in ipairs(obj:GetChildren()) do
+			DumpObject(child, indent + 1)
+		end
+	end
+end
+
+local function ProcessElement(obj, parentGui)
+	if not isActive or not obj or not obj.Parent then return end
+	local results = DeepScan(obj)
+	if not results then return end
+
+	totalSeen += 1
+	SeenLbl.Text = "👁 Seen: " .. totalSeen
+
+	for _, imgData in ipairs(results.images) do
+		local imgId = imgData.img
+		AddLog("[img] " .. imgId .. " vis=" .. tostring(imgData.vis), Color3.fromRGB(100, 160, 255))
+	end
+
+	if autoClickEnabled and InputBox.Text ~= "" then
+		local targetId = InputBox.Text:match("rbxassetid://%d+") or InputBox.Text
+		for _, imgData in ipairs(results.images) do
+			if imgData.img == targetId and imgData.vis then
+				local button = nil
+				if obj:IsA("ImageButton") or obj:IsA("TextButton") then
+					button = obj
+				else
+					for _, b in ipairs(results.buttons) do
+						if b.Visible then button = b; break end
+					end
+					if not button then button = obj end
+				end
+
+				MakeDot(obj, Color3.fromRGB(50, 255, 50), "CLICK")
+				local method = FireButton(button)
+				totalClicked += 1
+				ClickedLbl.Text = "✅ Clicked: " .. totalClicked
+				AddLog("[CLICK] " .. obj.Name .. " via " .. method, Color3.fromRGB(80, 255, 120))
+				SetStatus("✅ Clicked! #"..totalClicked, 15, 50, 20)
+				return
+			end
+		end
+	end
+
+	for _, btn in ipairs(results.buttons) do
+		local sigCount = 0
+		if typeof(getconnections) == "function" then
+			for _, sig in ipairs({"Activated","MouseButton1Click","MouseButton1Down"}) do
+				pcall(function() sigCount += #getconnections(btn[sig]) end)
+			end
+		end
+		if sigCount > 0 then
+			AddLog("[btn] " .. btn.Name .. " (" .. btn.ClassName .. ") signals=" .. sigCount .. " active=" .. tostring(btn.Active),
+				Color3.fromRGB(255, 200, 80))
+		end
+	end
+end
+
+-- ==========================================
+-- HOOKS
+-- ==========================================
+local function HookFrame(frame, guiName)
+	AddLog("[hook] " .. guiName .. " > " .. frame.Name, Color3.fromRGB(100, 180, 255))
+
+	for _, child in ipairs(frame:GetChildren()) do
+		task.spawn(function()
+			task.wait(0.03)
+			ProcessElement(child, guiName)
+		end)
+	end
+
+	local conn = frame.ChildAdded:Connect(function(child)
+		task.spawn(function()
+			task.wait(0.03)
+			ProcessElement(child, guiName)
+		end)
+	end)
+	table.insert(connections, conn)
+
+	local conn2 = frame.DescendantAdded:Connect(function(desc)
+		if desc:IsA("ImageLabel") or desc:IsA("ImageButton") then
+			if desc.Image ~= "" then
+				IdLbl.Text = "🖼 " .. desc.Image
+				AddLog("[desc] " .. desc.Image, Color3.fromRGB(160, 120, 255))
+			end
+		end
+	end)
+	table.insert(connections, conn2)
+end
+
+local function HookGui(gui)
+	if watchedGuis[gui] then return end
+	watchedGuis[gui] = true
+
+	local hookedAny = false
+	for _, child in ipairs(gui:GetChildren()) do
+		if child:IsA("Frame") or child:IsA("ScrollingFrame") then
+			HookFrame(child, gui.Name)
+			hookedAny = true
+		end
+	end
+	if not hookedAny then
+		local conn = gui.ChildAdded:Connect(function(child)
+			task.spawn(function()
+				task.wait(0.1)
+				if child:IsA("Frame") or child:IsA("ScrollingFrame") then
+					HookFrame(child, gui.Name)
+				else
+					ProcessElement(child, gui.Name)
+				end
+			end)
+		end)
+		table.insert(connections, conn)
+	end
+
+	local conn = gui.ChildAdded:Connect(function(child)
+		if child:IsA("Frame") or child:IsA("ScrollingFrame") then
+			HookFrame(child, gui.Name)
+		end
+	end)
+	table.insert(connections, conn)
+end
+
+-- ==========================================
+-- BUTTON EVENTS
+-- ==========================================
+ClearBtn.MouseButton1Click:Connect(function()
+	for _, lbl in ipairs(logLines) do pcall(function() lbl:Destroy() end) end
+	logLines = {}
+	totalSeen = 0; totalClicked = 0; totalSkipped = 0
+	SeenLbl.Text = "👁 Seen: 0"
+	ClickedLbl.Text = "✅ Clicked: 0"
+	SkippedLbl.Text = "💀 Skipped: 0"
+end)
+
+CopyBtn.MouseButton1Click:Connect(function()
+	local lines = {}
+	for _, lbl in ipairs(logLines) do
+		if lbl and lbl.Parent then table.insert(lines, lbl.Text) end
+	end
+	local full = table.concat(lines, "\n")
+	local copied = false
+	if typeof(setclipboard) == "function" then setclipboard(full); copied = true
+	elseif typeof(toclipboard) == "function" then toclipboard(full); copied = true end
+	CopyBtn.Text = copied and "✅ Copied!" or "❌ No API"
+	CopyBtn.BackgroundColor3 = copied and Color3.fromRGB(20,80,20) or Color3.fromRGB(80,20,20)
+	task.wait(1.5)
+	CopyBtn.Text = "📋 Copy"
+	CopyBtn.BackgroundColor3 = Color3.fromRGB(30,50,30)
+end)
+
+SpyBtn.MouseButton1Click:Connect(function()
+	AddLog("=== SPY ALL BUTTONS ===", Color3.fromRGB(255, 200, 50))
+	for _, gui in ipairs(PlayerGui:GetChildren()) do
+		for _, desc in ipairs(gui:GetDescendants()) do
+			if (desc:IsA("ImageButton") or desc:IsA("TextButton")) and desc.Visible then
+				AddLog("[spy] " .. desc:GetFullName(), Color3.fromRGB(200, 180, 100))
+				SpyElement(desc, "  ")
+			end
+		end
+	end
+	AddLog("=== SPY DONE ===", Color3.fromRGB(255, 200, 50))
+end)
+
+AutoBtn.MouseButton1Click:Connect(function()
+	autoClickEnabled = not autoClickEnabled
+	if autoClickEnabled then
+		AutoBtn.Text = "⏸ Stop"
+		AutoBtn.BackgroundColor3 = Color3.fromRGB(180,80,20)
+		AddLog("[auto] started, target: " .. (InputBox.Text ~= "" and InputBox.Text or "NONE SET"), Color3.fromRGB(80,255,120))
+		SetStatus("🤖 AutoClick ON", 15, 50, 20)
+	else
+		AutoBtn.Text = "▶ AutoClick"
+		AutoBtn.BackgroundColor3 = Color3.fromRGB(30,80,30)
+		AddLog("[auto] stopped", Color3.fromRGB(200,100,100))
+		SetStatus("⏸ AutoClick OFF", 20, 20, 35)
+	end
+end)
+
+DumpBtn.MouseButton1Click:Connect(function()
+	AddLog("=== FULL GUI DUMP ===", Color3.fromRGB(255,160,40))
+	for _, gui in ipairs(PlayerGui:GetChildren()) do
+		AddLog("GUI: " .. gui.Name .. " (" .. gui.ClassName .. ")", Color3.fromRGB(220,180,80))
+		for _, child in ipairs(gui:GetChildren()) do
+			DumpObject(child, 1)
+		end
+	end
+	AddLog("=== DUMP DONE ===", Color3.fromRGB(255,160,40))
+end)
+
+CloseBtn.MouseButton1Click:Connect(function()
+	isActive = false
+	for _, c in ipairs(connections) do pcall(function() c:Disconnect() end) end
+	Screen:Destroy()
+	dotsGui:Destroy()
+end)
+
+-- ==========================================
+-- INIT
+-- ==========================================
+AddLog("[init] Axiom Universal Debugger — " .. game.Name, Color3.fromRGB(180,180,255))
+AddLog("[init] executor APIs: " ..
+	(typeof(getconnections)=="function" and "getconnections " or "") ..
+	(typeof(firesignal)=="function" and "firesignal " or "") ..
+	(typeof(firebutton)=="function" and "firebutton " or "") ..
+	(typeof(setclipboard)=="function" and "setclipboard" or ""),
+	Color3.fromRGB(140,140,200))
+
+for _, gui in ipairs(PlayerGui:GetChildren()) do
+	if gui:IsA("ScreenGui") or gui:IsA("GuiObject") then
+		HookGui(gui)
+	end
+end
+
+table.insert(connections, PlayerGui.ChildAdded:Connect(function(gui)
+	AddLog("[new gui] " .. gui.Name, Color3.fromRGB(140,200,255))
+	task.wait(0.3)
+	if gui:IsA("ScreenGui") or gui:IsA("GuiObject") then
+		HookGui(gui)
+	end
+end))
+
+SetStatus("✅ Watching " .. #PlayerGui:GetChildren() .. " GUIs", 15, 40, 60)
+print("✅ Axiom Universal Debugger V1 loaded on " .. game.Name)
