@@ -1,0 +1,29 @@
+local RS = game:GetService("ReplicatedStorage")
+local LP = game:GetService("Players").LocalPlayer
+local Lib = require(RS:WaitForChild("Lib"))
+local Net = RS.Util.Net
+
+-- spy every single RE fired client→server
+for _, obj in ipairs(Net:GetDescendants()) do
+    if obj:IsA("RemoteEvent") then
+        local name = obj.Name
+        local old; old = hookfunction(obj.FireServer, function(self, ...)
+            if rawequal(self, obj) then
+                print("[FIRE→SERVER]", name, ...)
+            end
+            return old(self, ...)
+        end)
+    end
+end
+
+-- spy every RE received server→client
+for _, obj in ipairs(Net:GetDescendants()) do
+    if obj:IsA("RemoteEvent") then
+        local name = obj.Name
+        obj.OnClientEvent:Connect(function(...)
+            print("[SERVER→CLIENT]", name, ...)
+        end)
+    end
+end
+
+print("Full spy active. Now run their script and wait to NOT die.")
