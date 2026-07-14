@@ -1,0 +1,259 @@
+-- ==========================================
+-- CONFIGURATION PATH (GANTI DI SINI BOS)
+-- ==========================================
+-- Gunakan tanda kutip tunggal (' ') agar tanda kutip ganda di dalam tidak bentrok
+local TargetPath = 'workspace.NPCs["Shirley Brown"]'
+
+
+-- ==========================================
+-- NPC MONITOR GUI v3 (CUSTOM PATH & ANTI-SPAM)
+-- ==========================================
+local CoreGui = game:GetService("CoreGui")
+local Players = game:GetService("Players")
+
+if CoreGui:FindFirstChild("NPCMonitorGUI") then
+	CoreGui.NPCMonitorGUI:Destroy()
+end
+
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "NPCMonitorGUI"
+screenGui.Parent = CoreGui
+
+local mainFrame = Instance.new("Frame")
+mainFrame.Size = UDim2.new(0, 450, 0, 320)
+mainFrame.Position = UDim2.new(1, -470, 1, -340)
+mainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+mainFrame.BorderSizePixel = 0
+mainFrame.Draggable = true
+mainFrame.Active = true
+mainFrame.Parent = screenGui
+
+local titleBar = Instance.new("Frame")
+titleBar.Size = UDim2.new(1, 0, 0, 30)
+titleBar.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+titleBar.BorderSizePixel = 0
+titleBar.Parent = mainFrame
+
+local titleText = Instance.new("TextLabel")
+titleText.Size = UDim2.new(1, -120, 1, 0)
+titleText.Position = UDim2.new(0, 10, 0, 0)
+titleText.BackgroundTransparency = 1
+titleText.Text = "Memuat Target..."
+titleText.TextColor3 = Color3.fromRGB(0, 255, 150)
+titleText.Font = Enum.Font.GothamBold
+titleText.TextSize = 13
+titleText.TextXAlignment = Enum.TextXAlignment.Left
+titleText.Parent = titleBar
+
+local copyBtn = Instance.new("TextButton")
+copyBtn.Size = UDim2.new(0, 70, 0, 24)
+copyBtn.Position = UDim2.new(1, -105, 0, 3)
+copyBtn.BackgroundColor3 = Color3.fromRGB(70, 130, 200)
+copyBtn.Text = "COPY"
+copyBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+copyBtn.Font = Enum.Font.GothamBold
+copyBtn.TextSize = 12
+copyBtn.Parent = titleBar
+Instance.new("UICorner", copyBtn).CornerRadius = UDim.new(0, 4)
+
+local closeBtn = Instance.new("TextButton")
+closeBtn.Size = UDim2.new(0, 30, 0, 30)
+closeBtn.Position = UDim2.new(1, -30, 0, 0)
+closeBtn.BackgroundTransparency = 1
+closeBtn.Text = "X"
+closeBtn.TextColor3 = Color3.fromRGB(255, 70, 70)
+closeBtn.Font = Enum.Font.GothamBold
+closeBtn.TextSize = 16
+closeBtn.Parent = titleBar
+
+local scrollFrame = Instance.new("ScrollingFrame")
+scrollFrame.Size = UDim2.new(1, -20, 1, -40)
+scrollFrame.Position = UDim2.new(0, 10, 0, 35)
+scrollFrame.BackgroundTransparency = 1
+scrollFrame.ScrollBarThickness = 5
+scrollFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
+scrollFrame.AutomaticCanvasSize = Enum.AutomaticSize.Y
+scrollFrame.Parent = mainFrame
+
+local listLayout = Instance.new("UIListLayout")
+listLayout.SortOrder = Enum.SortOrder.LayoutOrder
+listLayout.Padding = UDim.new(0, 2)
+listLayout.Parent = scrollFrame
+
+-- ==========================================
+-- VARIABEL & FILTER SPAM
+-- ==========================================
+local connections = {}
+local logCount = 0
+local fullLogCache = {}
+
+local ignoredProps = {
+	["CFrame"] = true, 
+	["Position"] = true, 
+	["Rotation"] = true,
+	["Parent"] = true,
+	["FillTransparency"] = true, 
+	["OutlineTransparency"] = true 
+}
+
+local spamDebounce = {}
+local function canLogEvent(action, objName)
+	local key = action .. "_" .. objName
+	local now = tick()
+	if spamDebounce[key] and (now - spamDebounce[key]) < 2 then return false end
+	spamDebounce[key] = now
+	return true
+end
+
+-- ==========================================
+-- FUNGSI LOG & SENSOR
+-- ==========================================
+local function addLog(text, color)
+	logCount = logCount + 1
+	local finalString = string.format("[%d] %s", logCount, text)
+	
+	table.insert(fullLogCache, finalString)
+	print("[Monitor Log] " .. text)
+	
+	local logLabel = Instance.new("TextLabel")
+	logLabel.Size = UDim2.new(1, 0, 0, 18)
+	logLabel.BackgroundTransparency = 1
+	logLabel.Text = finalString
+	logLabel.TextColor3 = color or Color3.fromRGB(220, 220, 220)
+	logLabel.Font = Enum.Font.Code
+	logLabel.TextSize = 11
+	logLabel.TextXAlignment = Enum.TextXAlignment.Left
+	logLabel.TextWrapped = true
+	logLabel.AutomaticSize = Enum.AutomaticSize.Y
+	logLabel.Parent = scrollFrame
+	
+	scrollFrame.CanvasPosition = Vector2.new(0, 999999)
+end
+
+local function attachSensor(obj)
+	local conn = obj.Changed:Connect(function(prop)
+		if ignoredProps[prop] then return end
+		local success, val = pcall(function() return obj[prop] end)
+		local valStr = success and tostring(val) or "(Protected)"
+		addLog(string.format("%s prop '%s' ➔ %s", obj.Name, prop, valStr), Color3.fromRGB(200, 200, 200))
+	end)
+	table.insert(connections, conn)
+end
+
+-- ==========================================
+-- PEMBACA PATH (PATH RESOLVER)
+-- ==========================================
+local function parsePath(pathStr)
+	local parts = {}
+	-- Membaca format `workspace.Folder` maupun `["Nama Part"]` dengan mengabaikan tanda kutip
+	for match in pathStr:gmatch("[^%.%[%]\"']+") do
+		table.insert(parts, match)
+	end
+	return parts
+end
+
+local function getTargetFromPath()
+	local parts = parsePath(TargetPath)
+	local current = game
+	
+	if parts[1]:lower() == "workspace" then
+		current = workspace
+		table.remove(parts, 1)
+	elseif parts[1]:lower() == "game" then
+		table.remove(parts, 1)
+	end
+	
+	local parentNode = current
+	local targetName = parts[#parts] or "Unknown"
+
+	for i = 1, #parts do
+		if current then
+			if i == #parts then parentNode = current end
+			current = current:FindFirstChild(parts[i])
+		else
+			return nil, parentNode, targetName
+		end
+	end
+	
+	return current, parentNode, targetName
+end
+
+-- ==========================================
+-- MAIN MONITORING LOGIC
+-- ==========================================
+local function startMonitoring()
+	local target, parentNode, targetName = getTargetFromPath()
+	titleText.Text = "Monitor: " .. targetName
+
+	if not target then
+		addLog(string.format("Target '%s' belum ada di map!", targetName), Color3.fromRGB(255, 200, 0))
+		
+		if parentNode then
+			addLog("Menunggu target spawn di dalam: " .. parentNode.Name, Color3.fromRGB(150, 150, 150))
+			local waitConn
+			waitConn = parentNode.ChildAdded:Connect(function(child)
+				if child.Name == targetName then
+					addLog(string.format("Target '%s' muncul!", targetName), Color3.fromRGB(0, 255, 0))
+					waitConn:Disconnect()
+					startMonitoring() -- Mulai pasang sensor
+				end
+			end)
+			table.insert(connections, waitConn)
+		else
+			addLog("Parent path tidak ditemukan! Cek kembali penulisan path-mu.", Color3.fromRGB(255, 70, 70))
+		end
+		return
+	end
+
+	addLog("Target dikunci: " .. targetName .. ". Filter Spam AKTIF.", Color3.fromRGB(0, 255, 150))
+
+	-- Pasang sensor ke target & anak-anaknya yang sudah ada
+	attachSensor(target)
+	for _, desc in ipairs(target:GetDescendants()) do attachSensor(desc) end
+
+	-- Sensor anak baru
+	local addedConn = target.DescendantAdded:Connect(function(desc)
+		if canLogEvent("ADD", desc.Name) then
+			addLog(string.format("➕ OBJEK BARU: %s [%s]", desc.Name, desc.ClassName), Color3.fromRGB(0, 255, 100))
+		end
+		attachSensor(desc)
+	end)
+	table.insert(connections, addedConn)
+
+	-- Sensor anak dihapus
+	local removingConn = target.DescendantRemoving:Connect(function(desc)
+		if canLogEvent("REMOVE", desc.Name) then
+			addLog(string.format("➖ OBJEK DIHAPUS: %s", desc.Name), Color3.fromRGB(255, 100, 100))
+		end
+	end)
+	table.insert(connections, removingConn)
+end
+
+-- ==========================================
+-- KONTROL TOMBOL
+-- ==========================================
+copyBtn.MouseButton1Click:Connect(function()
+	local allText = table.concat(fullLogCache, "\n")
+	local success, err = pcall(function() setclipboard(allText) end)
+	
+	if success then
+		copyBtn.Text = "COPIED!"
+		copyBtn.BackgroundColor3 = Color3.fromRGB(40, 180, 80)
+		task.delay(2, function()
+			copyBtn.Text = "COPY"
+			copyBtn.BackgroundColor3 = Color3.fromRGB(70, 130, 200)
+		end)
+	else
+		addLog("Gagal Copy! Executor tidak support setclipboard().", Color3.fromRGB(255, 70, 70))
+	end
+end)
+
+closeBtn.MouseButton1Click:Connect(function()
+	for _, conn in ipairs(connections) do if conn then conn:Disconnect() end end
+	table.clear(connections)
+	table.clear(fullLogCache)
+	screenGui:Destroy()
+	print("[Monitor Log] Ditutup dengan bersih.")
+end)
+
+startMonitoring()
