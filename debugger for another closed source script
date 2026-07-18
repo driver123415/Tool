@@ -27,3 +27,23 @@ for _, obj in ipairs(Net:GetDescendants()) do
 end
 
 print("Full spy active. Now run their script and wait to NOT die.")
+
+
+
+------------------------------------------------------------------------
+
+-- Inject ini SEBELUM aktifin script orang itu
+local oldRequire = require
+getgenv().require = function(mod, ...)
+    local result = oldRequire(mod, ...)
+    pcall(function()
+        print("[MODULE LOADED]", mod:GetFullName())
+        local ok, src = pcall(function() return mod.Source end)
+        if ok and src and #src > 50 then
+            print("[SOURCE]", src)
+        end
+    end)
+    return result
+end
+
+print("[AXIOM] require hooked. Aktifin script-nya boss man.")
