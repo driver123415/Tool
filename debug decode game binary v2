@@ -1,0 +1,564 @@
+--======================================================================--
+--  🧪 AXIOM ULTIMATE DEBUGGER v7
+--  Fitur:
+--    - Intersep semua Server↔Client traffic
+--    - Hex dump, string extract, integer scan, table inspector
+--    - Auto-detect stock_XXXX dari buffer/string/table
+--    - Auto-inject Pickup (string) dan opsi Grab/Drop
+--    - Konfigurasi fleksibel di awal
+--    - Komentar detail di setiap bagian
+--======================================================================--
+
+-- =========================[ KONFIGURASI ]=========================
+-- ★ Ubah bagian ini sesuai kebutuhan ★
+
+local CONFIG = {
+    -- Target remote (nama persis, atau "*" untuk semua)
+    TARGET_REMOTE_NAME = "TOYWAREHOUSE_BLINK_RELIABLE_REMOTE",  -- "*" untuk semua remote
+
+    -- Auto-inject setelah mendeteksi stock ID
+    AUTO_INJECT = true,                -- true = kirim otomatis
+
+    -- Aksi yang akan di-inject
+    INJECT_PICKUP = true,              -- kirim "stock_<id>"
+    INJECT_GRAB = true,               -- kirim ItemGrab (pakai buffer/string)
+    INJECT_DROP = false,              -- kirim DropWorldTarget (perlu counter & posisi)
+
+    -- Format payload untuk Pickup (string terbukti berhasil)
+    PICKUP_PAYLOAD_FORMAT = "stock_%s",   -- %s diganti stockId
+
+    -- Format payload untuk Grab (coba string dulu, jika gagal ubah ke buffer)
+    GRAB_PAYLOAD_TYPE = "string",      -- "string" atau "buffer"
+    GRAB_ITEM_ID = "dumplings_lava_dumpling",  -- contoh, nanti akan diambil dari event
+
+    -- Format Drop (buffer template, nanti disesuaikan)
+    DROP_BUFFER_TEMPLATE = "03 0C 04 00 0B 00 00 00 01 00 00 00 00 00 44 72 6F 70 57 6F 72 6C 64 54 61 72 67 65 74 00 00 00 00 00 00 F0 3F",
+
+    -- Logging detail
+    LOG_HEXDUMP = true,                -- tampilkan hex dump buffer
+    LOG_STRINGS = true,                -- tampilkan string yang diekstrak
+    LOG_INTEGERS = true,               -- tampilkan integer yang ditemukan
+    LOG_TABLES = true,                 -- tampilkan isi table
+    LOG_UI_CLICKS = true,              -- tampilkan klik UI
+
+    -- Ekstrak stock ID dari mana saja (buffer, string, table)
+    EXTRACT_STOCK_FROM_BUFFER = true,
+    EXTRACT_STOCK_FROM_STRING = true,
+    EXTRACT_STOCK_FROM_TABLE = true,
+
+    -- Cegah duplikasi stock ID (hanya inject sekali per ID)
+    PREVENT_DUPLICATE_STOCK = true,
+
+    -- Delay antar inject (detik)
+    INJECT_DELAY = 0.1,
+
+    -- Filter hanya remote tertentu
+    FILTER_REMOTE_BY_NAME = true,      -- jika true, hanya remote dengan nama TARGET_REMOTE_NAME
+}
+
+-- =========================[ KONFIGURASI LANJUTAN ]================
+-- Jika ingin menangkap semua remote, set TARGET_REMOTE_NAME = "*"
+-- Untuk menambahkan remote lain, tambahkan ke daftar di bawah atau ubah filter.
+
+-- =================================================================
+
+-- ========================[ INISIALISASI ]=========================
+local Players = game:GetService("Players")
+local LP = Players.LocalPlayer
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local injectedStockIds = {}   -- untuk mencegah duplikat
+
+-- ========================[ UTILITIES ]============================
+
+-- Konversi buffer ke hex string
+local function toHex(b)
+    local out = {}
+    for i = 1, buffer.len(b) do
+        out[i] = string.format("%02X", buffer.readu8(b, i - 1))
+    end
+    return table.concat(out, " ")
+end
+
+-- Ekstrak semua string printable dari buffer
+local function extractAllStrings(b, minLen)
+    minLen = minLen or 3
+    local results = {}
+    local len = buffer.len(b)
+    local i = 0
+    while i < len do
+        local byte = buffer.readu8(b, i)
+        if byte >= 32 and byte <= 126 then
+            local str = {}
+            while i < len do
+                local c = buffer.readu8(b, i)
+                if c >= 32 and c <= 126 then
+                    str[#str + 1] = string.char(c)
+                    i = i + 1
+                else
+                    break
+                end
+            end
+            local s = table.concat(str)
+            if #s >= minLen then
+                results[#results + 1] = { offset = i - #s, value = s }
+            end
+        else
+            i = i + 1
+        end
+    end
+    return results
+end
+
+-- Scan integer dari buffer (u16, u32)
+local function scanIntegers(b)
+    local len = buffer.len(b)
+    local found = {}
+    for i = 0, len - 4 do
+        local ok, v = pcall(buffer.readu32, b, i)
+        if ok and v > 1000 and v < 999999999 then
+            found[#found + 1] = { offset = i, value = v, type = "u32" }
+        end
+    end
+    for i = 0, len - 2 do
+        local ok, v = pcall(buffer.readu16, b, i)
+        if ok and v > 10 and v < 65535 then
+            found[#found + 1] = { offset = i, value = v, type = "u16" }
+        end
+    end
+    return found
+end
+
+-- Coba ekstrak stock ID dari berbagai tipe argumen
+local function tryExtractStockIdFromArg(arg, depth)
+    depth = depth or 0
+    if depth > 5 then return nil end  -- hindari infinite loop
+
+    if typeof(arg) == "buffer" and CONFIG.EXTRACT_STOCK_FROM_BUFFER then
+        local strings = extractAllStrings(arg, 4)
+        for _, s in ipairs(strings) do
+            local match = s.value:match("[Ss]tock[_%-]?(%d+)")
+            if match then return match end
+        end
+    elseif type(arg) == "string" and CONFIG.EXTRACT_STOCK_FROM_STRING then
+        local match = arg:match("[Ss]tock[_%-]?(%d+)")
+        if match then return match end
+    elseif type(arg) == "table" and CONFIG.EXTRACT_STOCK_FROM_TABLE then
+        for k, v in pairs(arg) do
+            local id = tryExtractStockIdFromArg(v, depth + 1)
+            if id then return id end
+        end
+    end
+    return nil
+end
+
+-- ========================[ DISSECTOR ]============================
+
+-- Dissect buffer: hex dump, string, integer
+local function dissectBuffer(b, argIndex)
+    if not CONFIG.LOG_HEXDUMP then return end
+
+    local len = buffer.len(b)
+    print(string.format("  ┌─ Arg[%d] Buffer (%d bytes) ─────────────────", argIndex, len))
+
+    -- Hex dump 16 byte per baris
+    for row = 0, math.ceil(len / 16) - 1 do
+        local hexParts, asciiParts = {}, {}
+        for col = 0, 15 do
+            local offset = row * 16 + col
+            if offset < len then
+                local byte = buffer.readu8(b, offset)
+                hexParts[#hexParts + 1] = string.format("%02X", byte)
+                if byte >= 32 and byte <= 126 then
+                    asciiParts[#asciiParts + 1] = string.char(byte)
+                else
+                    asciiParts[#asciiParts + 1] = "."
+                end
+            else
+                hexParts[#hexParts + 1] = "  "
+                asciiParts[#asciiParts + 1] = " "
+            end
+        end
+        print(string.format("  │ %04X: %-48s | %s", row * 16,
+            table.concat(hexParts, " "),
+            table.concat(asciiParts, "")))
+    end
+
+    -- Strings
+    if CONFIG.LOG_STRINGS then
+        local strs = extractAllStrings(b, 3)
+        if #strs > 0 then
+            print("  │ STRINGS DITEMUKAN:")
+            for _, s in ipairs(strs) do
+                print(string.format("  │   offset=0x%02X → \"%s\"", s.offset, s.value))
+            end
+        end
+    end
+
+    -- Integers
+    if CONFIG.LOG_INTEGERS then
+        local ints = scanIntegers(b)
+        if #ints > 0 then
+            print("  │ INTEGERS MENARIK:")
+            for _, iv in ipairs(ints) do
+                print(string.format("  │   offset=0x%02X [%s] = %d", iv.offset, iv.type, iv.value))
+            end
+        end
+    end
+
+    print("  └────────────────────────────────────────────")
+end
+
+-- Table inspector rekursif
+local function inspectTable(t, depth, prefix)
+    if not CONFIG.LOG_TABLES then return end
+    depth = depth or 0
+    prefix = prefix or "  │ "
+    if depth > 3 then
+        print(prefix .. "[MAX DEPTH]")
+        return
+    end
+    local indent = string.rep("  ", depth)
+    for k, v in pairs(t) do
+        local vtype = typeof(v)
+        if vtype == "table" then
+            print(prefix .. indent .. "[" .. tostring(k) .. "] (table):")
+            inspectTable(v, depth + 1, prefix)
+        elseif vtype == "Instance" then
+            local ok, cn = pcall(function() return v.ClassName end)
+            local ok2, fn = pcall(function() return v:GetFullName() end)
+            print(prefix .. indent .. "[" .. tostring(k) .. "] Instance<" .. (ok and cn or "?") .. "> = " .. (ok2 and fn or "unknown"))
+        elseif vtype == "Vector3" then
+            print(prefix .. indent .. string.format("[%s] Vector3(%.3f, %.3f, %.3f)", tostring(k), v.X, v.Y, v.Z))
+        elseif vtype == "CFrame" then
+            local pos = v.Position
+            print(prefix .. indent .. string.format("[%s] CFrame pos=(%.2f,%.2f,%.2f)", tostring(k), pos.X, pos.Y, pos.Z))
+        elseif vtype == "buffer" then
+            print(prefix .. indent .. "[" .. tostring(k) .. "] (buffer " .. buffer.len(v) .. "b): " .. toHex(v))
+        elseif vtype == "userdata" then
+            -- Coba deteksi tipe userdata
+            local mt = getrawmetatable and getrawmetatable(v)
+            local typeName = mt and tostring(mt) or "unknown"
+            print(prefix .. indent .. "[" .. tostring(k) .. "] (userdata): " .. typeName)
+        else
+            print(prefix .. indent .. "[" .. tostring(k) .. "] (" .. vtype .. ") = " .. tostring(v))
+        end
+    end
+end
+
+-- ========================[ INJECTOR ]=============================
+
+-- Fungsi inject aksi ke server
+local function injectAction(remote, actionType, stockId, extraData)
+    if not remote then
+        warn("[!] Remote tidak ditemukan, tidak bisa inject")
+        return
+    end
+
+    if CONFIG.PREVENT_DUPLICATE_STOCK and injectedStockIds[stockId] then
+        print("[⏭️] Stock " .. stockId .. " sudah diproses, lewati.")
+        return
+    end
+
+    -- Tandai sebagai sudah diproses (jika prevent duplicate)
+    if CONFIG.PREVENT_DUPLICATE_STOCK then
+        injectedStockIds[stockId] = true
+    end
+
+    local success = false
+
+    if actionType == "Pickup" and CONFIG.INJECT_PICKUP then
+        local payload = string.format(CONFIG.PICKUP_PAYLOAD_FORMAT, stockId)
+        print(string.format("[📤] MENGIRIM PickupClientShelfStock dengan ID %s (payload: %s)", stockId, payload))
+        pcall(function()
+            remote:FireServer(payload)
+            success = true
+        end)
+    elseif actionType == "Grab" and CONFIG.INJECT_GRAB then
+        if CONFIG.GRAB_PAYLOAD_TYPE == "string" then
+            local payload = "grab_" .. stockId
+            print(string.format("[📤] MENGIRIM ItemGrab dengan string: %s", payload))
+            pcall(function()
+                remote:FireServer(payload)
+                success = true
+            end)
+        else
+            -- Buat buffer ItemGrab (template dari log)
+            -- Format: 42 08 00 49 74 65 6D 47 72 61 62 02 01 [len u16] "item_id"
+            local itemId = extraData and extraData.itemId or CONFIG.GRAB_ITEM_ID
+            local buf = buffer.create(4 + #"ItemGrab" + 2 + #itemId + 1) -- perkiraan
+            local offset = 0
+            buffer.writeu8(buf, offset, 0x42); offset = offset + 1
+            buffer.writeu8(buf, offset, 0x08); offset = offset + 1
+            buffer.writeu8(buf, offset, 0x00); offset = offset + 1
+            -- Tulis string "ItemGrab"
+            for i = 1, #"ItemGrab" do
+                buffer.writeu8(buf, offset, string.byte("ItemGrab", i)); offset = offset + 1
+            end
+            buffer.writeu8(buf, offset, 0x02); offset = offset + 1
+            buffer.writeu8(buf, offset, 0x01); offset = offset + 1
+            -- Tulis panjang itemId (u16 little-endian)
+            buffer.writeu16(buf, offset, #itemId); offset = offset + 2
+            -- Tulis itemId
+            for i = 1, #itemId do
+                buffer.writeu8(buf, offset, string.byte(itemId, i)); offset = offset + 1
+            end
+            -- Arg2: table posisi (dummy)
+            local arg2 = { { volumeScale = 0.65, rollOffMaxDistance = 70, position = Vector3.new(0,0,0), rollOffMode = Enum.RollOffMode.InverseTapered, rollOffMinDistance = 8 } }
+            print(string.format("[📤] MENGIRIM ItemGrab dengan buffer + table untuk item %s", itemId))
+            pcall(function()
+                remote:FireServer(buf, arg2)
+                success = true
+            end)
+        end
+    elseif actionType == "Drop" and CONFIG.INJECT_DROP then
+        -- Kirim DropWorldTarget (header 03) dengan buffer template + table
+        -- Perlu counter yang increment; kita simpan counter global sederhana
+        if not injectAction._dropCounter then
+            injectAction._dropCounter = 0
+        end
+        injectAction._dropCounter = injectAction._dropCounter + 1
+        local counter = injectAction._dropCounter
+
+        -- Buat buffer dari template hex
+        local hexStr = CONFIG.DROP_BUFFER_TEMPLATE
+        local bytes = {}
+        for hex in string.gmatch(hexStr, "%x%x") do
+            bytes[#bytes + 1] = tonumber(hex, 16)
+        end
+        local buf = buffer.create(#bytes)
+        for i, v in ipairs(bytes) do
+            buffer.writeu8(buf, i-1, v)
+        end
+        -- Ganti counter di byte ke-1 (indeks 1) dengan nilai counter
+        buffer.writeu8(buf, 1, counter)
+
+        -- Arg2: table seperti di log
+        local arg2 = {
+            [1] = nil,  -- userdata, bisa diisi nil
+            [2] = {
+                useCameraDropAim = true,
+                direction = Vector3.new(0, -1, 0),
+                packingStationIntent = false,
+                origin = Vector3.new(0, 0, 0),
+                clickedPackBox = false,
+            },
+            [3] = {
+                selectedIndex = 1,
+                carryCount = 1,
+                carriedItemCount = 1,
+                clientBoxIds = {},
+            },
+            [4] = nil,
+        }
+        print(string.format("[📤] MENGIRIM DropWorldTarget dengan counter %d", counter))
+        pcall(function()
+            remote:FireServer(buf, arg2)
+            success = true
+        end)
+    end
+
+    if not success then
+        warn("[!] Gagal mengirim aksi " .. actionType)
+    end
+end
+
+-- ========================[ HOOK SERVER → CLIENT ]=================
+
+local function hookOnClientEvent(remote)
+    if remote:IsA("RemoteEvent") then
+        remote.OnClientEvent:Connect(function(...)
+            local args = {...}
+            print(string.format("\n[📥] Server → Client (Remote: %s)", remote.Name))
+            print("  Args count: " .. #args)
+
+            local stockId = nil
+            local itemId = nil
+
+            for i, arg in ipairs(args) do
+                local vtype = typeof(arg)
+                if vtype == "buffer" then
+                    dissectBuffer(arg, i)
+                    if CONFIG.EXTRACT_STOCK_FROM_BUFFER then
+                        stockId = tryExtractStockIdFromArg(arg) or stockId
+                    end
+                elseif vtype == "string" then
+                    print(string.format("  Arg[%d] (string): %s", i, arg))
+                    if CONFIG.EXTRACT_STOCK_FROM_STRING then
+                        stockId = tryExtractStockIdFromArg(arg) or stockId
+                    end
+                elseif vtype == "table" then
+                    print(string.format("  Arg[%d] Table:", i))
+                    inspectTable(arg, 0, "  │ ")
+                    if CONFIG.EXTRACT_STOCK_FROM_TABLE then
+                        stockId = tryExtractStockIdFromArg(arg) or stockId
+                        -- Coba ambil itemId juga
+                        if type(arg) == "table" then
+                            for k, v in pairs(arg) do
+                                if type(v) == "table" and v.itemId then
+                                    itemId = v.itemId
+                                elseif type(v) == "string" and v:match("dumplings_") then
+                                    itemId = v
+                                end
+                            end
+                        end
+                    end
+                else
+                    print(string.format("  Arg[%d] (%s): %s", i, vtype, tostring(arg)))
+                end
+            end
+
+            -- Auto-inject jika terdeteksi stock ID
+            if CONFIG.AUTO_INJECT and stockId then
+                print(string.format("[🎯] Stock ID terdeteksi: %s", stockId))
+                -- Inject Pickup
+                task.wait(CONFIG.INJECT_DELAY)
+                injectAction(remote, "Pickup", stockId)
+                -- Inject Grab (dengan itemId jika ada)
+                task.wait(CONFIG.INJECT_DELAY)
+                injectAction(remote, "Grab", stockId, { itemId = itemId })
+                -- Inject Drop jika diinginkan
+                if CONFIG.INJECT_DROP then
+                    task.wait(CONFIG.INJECT_DELAY)
+                    injectAction(remote, "Drop", stockId)
+                end
+            end
+        end)
+        print("[*] Hook OnClientEvent terpasang di " .. remote:GetFullName())
+    end
+end
+
+-- ========================[ HOOK CLIENT → SERVER ]=================
+
+-- Hook __namecall untuk menangkap FireServer / InvokeServer
+local oldNamecall
+oldNamecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
+    local method = getnamecallmethod()
+    if (method == "FireServer" or method == "InvokeServer") then
+        -- Cek apakah remote ini target
+        local shouldLog = false
+        if CONFIG.FILTER_REMOTE_BY_NAME then
+            if self.Name == CONFIG.TARGET_REMOTE_NAME or CONFIG.TARGET_REMOTE_NAME == "*" then
+                shouldLog = true
+            end
+        else
+            shouldLog = true
+        end
+
+        if shouldLog then
+            local args = {...}
+            print(string.format("\n[📤] Client → Server (%s) Remote: %s", method, self.Name))
+            print("  Args count: " .. #args)
+
+            local stockId = nil
+            for i, arg in ipairs(args) do
+                local vtype = typeof(arg)
+                if vtype == "buffer" then
+                    dissectBuffer(arg, i)
+                    if CONFIG.EXTRACT_STOCK_FROM_BUFFER then
+                        stockId = tryExtractStockIdFromArg(arg) or stockId
+                    end
+                elseif vtype == "string" then
+                    print(string.format("  Arg[%d] (string): %s", i, arg))
+                    if CONFIG.EXTRACT_STOCK_FROM_STRING then
+                        stockId = tryExtractStockIdFromArg(arg) or stockId
+                    end
+                elseif vtype == "table" then
+                    print(string.format("  Arg[%d] Table:", i))
+                    inspectTable(arg, 0, "  │ ")
+                    if CONFIG.EXTRACT_STOCK_FROM_TABLE then
+                        stockId = tryExtractStockIdFromArg(arg) or stockId
+                    end
+                else
+                    print(string.format("  Arg[%d] (%s): %s", i, vtype, tostring(arg)))
+                end
+            end
+
+            if stockId then
+                print("[🔍] Stock ID ditemukan di request client: " .. stockId)
+            end
+        end
+    end
+    return oldNamecall(self, ...)
+end))
+
+-- ========================[ HOOK UI CLICKS ]========================
+
+local function hookUI(btn)
+    if not CONFIG.LOG_UI_CLICKS then return end
+    if btn:IsA("GuiButton") then
+        btn.MouseButton1Click:Connect(function()
+            print("\n[🖱️] UI Click: " .. btn:GetFullName())
+        end)
+    end
+end
+
+local function hookAllUI()
+    local pg = LP:WaitForChild("PlayerGui")
+    for _, ui in ipairs(pg:GetDescendants()) do
+        hookUI(ui)
+    end
+    pg.DescendantAdded:Connect(hookUI)
+end
+
+-- ========================[ INIT REMOTES ]==========================
+
+local function hookAllRemotes()
+    local remotes = {}
+    -- Cari di ReplicatedStorage
+    for _, obj in ipairs(ReplicatedStorage:GetDescendants()) do
+        if obj:IsA("RemoteEvent") or obj:IsA("RemoteFunction") then
+            remotes[#remotes + 1] = obj
+        end
+    end
+    -- Opsional: tambahkan workspace atau lainnya jika perlu
+    -- for _, obj in ipairs(game:GetDescendants()) do ... end
+
+    print(string.format("[*] Menemukan %d Remote", #remotes))
+
+    for _, remote in ipairs(remotes) do
+        local shouldHook = false
+        if CONFIG.FILTER_REMOTE_BY_NAME then
+            if remote.Name == CONFIG.TARGET_REMOTE_NAME or CONFIG.TARGET_REMOTE_NAME == "*" then
+                shouldHook = true
+            end
+        else
+            shouldHook = true
+        end
+        if shouldHook then
+            hookOnClientEvent(remote)
+        end
+    end
+end
+
+-- ========================[ START ]================================
+
+print("\n" .. string.rep("=", 60))
+print("🧪 AXIOM ULTIMATE DEBUGGER v7")
+print("   - Intersep Server→Client & Client→Server")
+print("   - Hex dump, string, integer, table inspection")
+print("   - Auto-detect stock_XXXX")
+print("   - Auto-inject Pickup: " .. tostring(CONFIG.INJECT_PICKUP))
+print("   - Auto-inject Grab: " .. tostring(CONFIG.INJECT_GRAB))
+print("   - Auto-inject Drop: " .. tostring(CONFIG.INJECT_DROP))
+print("   - Remote target: " .. CONFIG.TARGET_REMOTE_NAME)
+print(string.rep("=", 60))
+
+-- Pasang hook ke semua remote
+hookAllRemotes()
+
+-- Pasang hook UI
+hookAllUI()
+
+print("[✅] Debugger siap. Semua traffic akan tercatat.\n")
+print("[💡] Untuk mengubah perilaku, edit variabel CONFIG di awal script.\n")
+print("[📌] Fitur:")
+print("   - 'AUTO_INJECT': nyalakan/matikan auto-inject")
+print("   - 'INJECT_PICKUP/GRAB/DROP': pilih aksi yang di-inject")
+print("   - 'PICKUP_PAYLOAD_FORMAT': format string untuk Pickup")
+print("   - 'GRAB_PAYLOAD_TYPE': 'string' atau 'buffer'")
+print("   - 'LOG_HEXDUMP/STRINGS/INTEGERS/TABLES': toggle log detail")
+print("   - 'PREVENT_DUPLICATE_STOCK': cegah spam ID yang sama")
+print("   - 'INJECT_DELAY': jeda antar inject (detik)")
+print("\n[🔧] Untuk menambahkan remote lain, ubah TARGET_REMOTE_NAME menjadi '*'")
+print("    atau tambahkan logika filter di fungsi hookAllRemotes().\n")
