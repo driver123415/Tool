@@ -1,0 +1,339 @@
+--========================================================--
+--  AXIOM DEEP DECODER v2
+--  Tujuan: Full byte dissection, hex dump, pattern mapper
+--========================================================--
+local Players = game:GetService("Players")
+local LP = Players.LocalPlayer
+
+-- ══════════════════════════════════════
+--  UTILITIES
+-- ══════════════════════════════════════
+
+local function toHex(b)
+    local out = {}
+    for i = 1, buffer.len(b) do
+        local byte = buffer.readu8(b, i - 1)
+        out[i] = string.format("%02X", byte)
+    end
+    return table.concat(out, " ")
+end
+
+local function toAsciiMap(b)
+    local out = {}
+    for i = 1, buffer.len(b) do
+        local byte = buffer.readu8(b, i - 1)
+        if byte >= 32 and byte <= 126 then
+            out[i] = string.char(byte)
+        else
+            out[i] = string.format("[%02X]", byte)
+        end
+    end
+    return table.concat(out, "")
+end
+
+-- Coba baca string dari offset tertentu, max len
+local function tryReadString(b, offset, maxLen)
+    maxLen = maxLen or 64
+    local result = {}
+    local len = buffer.len(b)
+    for i = offset, math.min(offset + maxLen - 1, len - 1) do
+        local byte = buffer.readu8(b, i)
+        if byte == 0 then break end
+        if byte >= 32 and byte <= 126 then
+            result[#result + 1] = string.char(byte)
+        else
+            break
+        end
+    end
+    return table.concat(result)
+end
+
+-- Scan semua string printable dari buffer
+local function extractAllStrings(b, minLen)
+    minLen = minLen or 3
+    local results = {}
+    local len = buffer.len(b)
+    local i = 0
+    while i < len do
+        local byte = buffer.readu8(b, i)
+        if byte >= 32 and byte <= 126 then
+            local str = {}
+            local startI = i
+            while i < len do
+                local c = buffer.readu8(b, i)
+                if c >= 32 and c <= 126 then
+                    str[#str + 1] = string.char(c)
+                    i = i + 1
+                else
+                    break
+                end
+            end
+            local s = table.concat(str)
+            if #s >= minLen then
+                results[#results + 1] = { offset = startI, value = s }
+            end
+        else
+            i = i + 1
+        end
+    end
+    return results
+end
+
+-- Coba decode integer dari berbagai offset
+local function scanIntegers(b)
+    local len = buffer.len(b)
+    local found = {}
+    for i = 0, len - 4 do
+        local ok, v = pcall(buffer.readu32, b, i)
+        if ok and v > 1000 and v < 999999999 then
+            found[#found + 1] = { offset = i, value = v, type = "u32" }
+        end
+    end
+    for i = 0, len - 2 do
+        local ok, v = pcall(buffer.readu16, b, i)
+        if ok and v > 10 and v < 65535 then
+            found[#found + 1] = { offset = i, value = v, type = "u16" }
+        end
+    end
+    return found
+end
+
+-- ══════════════════════════════════════
+--  PATTERN MEMORY — track sequences
+-- ══════════════════════════════════════
+
+local patternLog = {}
+local function logPattern(actionName, bufStr)
+    if not patternLog[actionName] then patternLog[actionName] = {} end
+    table.insert(patternLog[actionName], bufStr)
+    if #patternLog[actionName] > 1 then
+        -- Bandingkan dengan sebelumnya
+        local prev = patternLog[actionName][#patternLog[actionName] - 1]
+        if prev == bufStr then
+            print("  [🔁 PATTERN MATCH] Buffer identik dengan sebelumnya!")
+        else
+            print("  [🔀 PATTERN DIFF] Buffer berbeda dari sebelumnya")
+            -- Cari byte pertama yang berbeda
+            local len = math.min(#prev, #bufStr)
+            for ci = 1, len do
+                if prev:sub(ci, ci) ~= bufStr:sub(ci, ci) then
+                    print(string.format("  [DIFF START] Byte index %d berubah", ci - 1))
+                    break
+                end
+            end
+        end
+    end
+end
+
+-- ══════════════════════════════════════
+--  MAIN BUFFER DISSECTOR
+-- ══════════════════════════════════════
+
+local function dissectBuffer(b, argIndex)
+    local len = buffer.len(b)
+    print(string.format("  ┌─ Arg[%d] Buffer (%d bytes) ─────────────────", argIndex, len))
+
+    -- Hex dump, 16 bytes per baris
+    print("  │ HEX DUMP:")
+    for row = 0, math.ceil(len / 16) - 1 do
+        local hexParts = {}
+        local asciiParts = {}
+        for col = 0, 15 do
+            local offset = row * 16 + col
+            if offset < len then
+                local byte = buffer.readu8(b, offset)
+                hexParts[#hexParts + 1] = string.format("%02X", byte)
+                if byte >= 32 and byte <= 126 then
+                    asciiParts[#asciiParts + 1] = string.char(byte)
+                else
+                    asciiParts[#asciiParts + 1] = "."
+                end
+            else
+                hexParts[#hexParts + 1] = "  "
+                asciiParts[#asciiParts + 1] = " "
+            end
+        end
+        print(string.format("  │ %04X: %-48s | %s", row * 16,
+            table.concat(hexParts, " "),
+            table.concat(asciiParts, "")))
+    end
+
+    -- ASCII map
+    print("  │ ASCII MAP: " .. toAsciiMap(b))
+
+    -- Semua string printable
+    local strs = extractAllStrings(b, 3)
+    if #strs > 0 then
+        print("  │ STRINGS DITEMUKAN:")
+        for _, s in ipairs(strs) do
+            print(string.format("  │   offset=0x%02X → \"%s\"", s.offset, s.value))
+        end
+    end
+
+    -- Integer scan
+    local ints = scanIntegers(b)
+    if #ints > 0 then
+        print("  │ INTEGERS MENARIK:")
+        for _, iv in ipairs(ints) do
+            print(string.format("  │   offset=0x%02X [%s] = %d", iv.offset, iv.type, iv.value))
+        end
+    end
+
+    -- Header bytes (biasanya framing protocol ada di 4 byte pertama)
+    if len >= 4 then
+        local h1 = buffer.readu8(b, 0)
+        local h2 = buffer.readu8(b, 1)
+        local h3 = buffer.readu16(b, 0)
+        print(string.format("  │ HEADER BYTES: [0]=%02X [1]=%02X [0-1 u16]=%d", h1, h2, h3))
+    end
+
+    print("  └────────────────────────────────────────────")
+    return buffer.tostring(b)
+end
+
+-- ══════════════════════════════════════
+--  TABLE DEEP INSPECTOR
+-- ══════════════════════════════════════
+
+local function inspectTable(t, depth, prefix)
+    depth = depth or 0
+    prefix = prefix or ""
+    if depth > 3 then print(prefix .. "  [MAX DEPTH]") return end
+    local indent = string.rep("  ", depth)
+    for k, v in pairs(t) do
+        local vtype = typeof(v)
+        if vtype == "table" then
+            print(prefix .. indent .. "[" .. tostring(k) .. "] (table):")
+            inspectTable(v, depth + 1, prefix)
+        elseif vtype == "Instance" then
+            local ok, cn = pcall(function() return v.ClassName end)
+            local ok2, fn = pcall(function() return v:GetFullName() end)
+            print(prefix .. indent .. "[" .. tostring(k) .. "] Instance<" .. (ok and cn or "?") .. "> = " .. (ok2 and fn or "unknown"))
+        elseif vtype == "Vector3" then
+            print(prefix .. indent .. string.format("[%s] Vector3(%.3f, %.3f, %.3f)", tostring(k), v.X, v.Y, v.Z))
+        elseif vtype == "CFrame" then
+            local pos = v.Position
+            print(prefix .. indent .. string.format("[%s] CFrame pos=(%.2f,%.2f,%.2f)", tostring(k), pos.X, pos.Y, pos.Z))
+        elseif vtype == "buffer" then
+            print(prefix .. indent .. "[" .. tostring(k) .. "] (nested buffer " .. buffer.len(v) .. "b): " .. toHex(v))
+        elseif vtype == "userdata" then
+            -- Coba deteksi tipe userdata
+            local mt = getrawmetatable and getrawmetatable(v)
+            local typeName = mt and tostring(mt) or "unknown"
+            print(prefix .. indent .. "[" .. tostring(k) .. "] userdata → " .. typeName)
+            -- Coba baca sebagai number/vector
+            pcall(function()
+                if typeof(v) == "Vector3" then
+                    print(prefix .. indent .. "  ^ Vector3: " .. tostring(v))
+                end
+            end)
+        else
+            print(prefix .. indent .. "[" .. tostring(k) .. "] (" .. vtype .. ") = " .. tostring(v))
+        end
+    end
+end
+
+-- ══════════════════════════════════════
+--  ACTION CLASSIFIER
+-- ══════════════════════════════════════
+
+local function classifyAction(bufStr)
+    local patterns = {
+        { match = "PickupClientShelfStock", label = "📦 AMBIL DARI RAK" },
+        { match = "ItemGrab",               label = "✋ GRAB ITEM" },
+        { match = "DropWorldTarget",         label = "🗑️ DROP KE DUNIA" },
+        { match = "ItemDrop",                label = "📤 ITEM DROP EVENT" },
+        { match = "PlaceItem",               label = "📍 PLACE ITEM" },
+        { match = "Purchase",                label = "💰 PURCHASE" },
+        { match = "Checkout",                label = "🛒 CHECKOUT" },
+        { match = "stock",                   label = "📊 STOCK OPERATION" },
+        { match = "order",                   label = "📋 ORDER DATA" },
+    }
+    for _, p in ipairs(patterns) do
+        if bufStr:find(p.match) then return p.label end
+    end
+    return "❓ UNKNOWN ACTION"
+end
+
+-- ══════════════════════════════════════
+--  HOOK UI
+-- ══════════════════════════════════════
+
+local function hookUI(btn)
+    if btn:IsA("GuiButton") then
+        btn.MouseButton1Click:Connect(function()
+            print("\n[🎯 UI CLICK] " .. btn.Name)
+            print("  Path: " .. btn:GetFullName())
+        end)
+    end
+end
+
+local pg = LP:WaitForChild("PlayerGui")
+for _, ui in ipairs(pg:GetDescendants()) do hookUI(ui) end
+pg.DescendantAdded:Connect(hookUI)
+
+-- ══════════════════════════════════════
+--  REMOTE HOOK
+-- ══════════════════════════════════════
+
+local callCount = 0
+local oldNamecall
+oldNamecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
+    local method = getnamecallmethod()
+
+    if method == "FireServer" or method == "InvokeServer" then
+        local args = {...}
+        local hasBuffer = false
+        local bufStr = ""
+
+        -- Cek apakah ada buffer
+        for _, v in ipairs(args) do
+            if typeof(v) == "buffer" then
+                hasBuffer = true
+                bufStr = buffer.tostring(v)
+                break
+            end
+        end
+
+        -- Target remote saja
+        local isTarget = self.Name == "TOYWAREHOUSE_BLINK_RELIABLE_REMOTE" or
+                         (hasBuffer and self.ClassName == "RemoteEvent")
+
+        if isTarget and hasBuffer then
+            callCount = callCount + 1
+            local action = classifyAction(bufStr)
+            logPattern(action, bufStr)
+
+            print("\n" .. string.rep("═", 55))
+            print(string.format("[CALL #%d] [%s] %s → %s",
+                callCount, method, self.Name, action))
+            print(string.rep("─", 55))
+
+            for i, v in ipairs(args) do
+                local vtype = typeof(v)
+                if vtype == "buffer" then
+                    dissectBuffer(v, i)
+                elseif vtype == "table" then
+                    print(string.format("  ┌─ Arg[%d] Table ────────────────────────────", i))
+                    inspectTable(v, 0, "  │ ")
+                    print("  └────────────────────────────────────────────")
+                elseif vtype == "Instance" then
+                    print(string.format("  Arg[%d] (Instance): %s", i, v:GetFullName()))
+                elseif vtype == "userdata" then
+                    print(string.format("  Arg[%d] (userdata): %s", i, tostring(v)))
+                else
+                    print(string.format("  Arg[%d] (%s): %s", i, vtype, tostring(v)))
+                end
+            end
+
+            print(string.rep("═", 55))
+        end
+    end
+
+    return oldNamecall(self, ...)
+end))
+
+print("\n" .. string.rep("=", 45))
+print("🔬 AXIOM DECODER v2 — AKTIF")
+print("Lakukan aksi manual, decode otomatis.")
+print(string.rep("=", 45))
