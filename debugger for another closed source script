@@ -28,9 +28,131 @@ end
 
 print("Full spy active. Now run their script and wait to NOT die.")
 
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 
-------------------------------------------------------------------------
+-- [AXIOM] Remote Event Full Interceptor
+-- Pasang SEBELUM script utama jalan
+
+local RunService = game:GetService("RunService")
+local Players = game:GetService("Players")
+
+local LOG = {}
+local MAX_LOG = 200
+
+local function serialize(val, depth)
+    depth = depth or 0
+    if depth > 3 then return "..." end
+    local t = type(val)
+    if t == "number" or t == "boolean" then return tostring(val)
+    elseif t == "string" then return string.format("%q", val)
+    elseif t == "table" then
+        local parts = {}
+        for k, v in pairs(val) do
+            table.insert(parts, tostring(k).."="..serialize(v, depth+1))
+        end
+        return "{"..table.concat(parts, ", ").."}"
+    elseif typeof(val) == "Instance" then
+        return "[Instance:"..val.ClassName..":"..val:GetFullName().."]"
+    else
+        return "["..typeof(val)..":"..tostring(val).."]"
+    end
+end
+
+local function log(tag, re_name, ...)
+    local args = {...}
+    local parts = {}
+    for i, v in ipairs(args) do
+        parts[i] = serialize(v)
+    end
+    local msg = string.format("[%s] %s | ARGS(%d): %s", tag, re_name, #args, table.concat(parts, " | "))
+    print(msg)
+    table.insert(LOG, {tick(), tag, re_name, parts})
+    if #LOG > MAX_LOG then table.remove(LOG, 1) end
+end
+
+-- Hook semua RemoteEvent & RemoteFunction yang udah ada
+local function hookRemote(obj)
+    if obj:IsA("RemoteEvent") then
+        local oldFire = obj.OnClientEvent
+        obj.OnClientEvent:Connect(function(...)
+            log("SERVER→CLIENT", obj:GetFullName(), ...)
+        end)
+
+        -- Hook FireServer (client→server)
+        local mt = getrawmetatable(obj)
+        if mt then
+            local oldIndex = mt.__index
+            local oldNewIndex = mt.__newindex
+            -- pakai hookfunction kalau executor support
+            if hookfunction then
+                local oldFireServer = obj.FireServer
+                hookfunction(oldFireServer, function(self, ...)
+                    log("CLIENT→SERVER", obj:GetFullName(), ...)
+                    return oldFireServer(self, ...)
+                end)
+            end
+        end
+
+    elseif obj:IsA("RemoteFunction") then
+        -- Wrap InvokeServer
+        if hookfunction then
+            local oldInvoke = obj.InvokeServer
+            hookfunction(oldInvoke, function(self, ...)
+                log("CLIENT→SERVER [INVOKE]", obj:GetFullName(), ...)
+                local result = oldInvoke(self, ...)
+                log("SERVER→CLIENT [RETURN]", obj:GetFullName(), result)
+                return result
+            end)
+        end
+    end
+end
+
+-- Scan semua existing remotes
+local function scanAll(parent)
+    for _, obj in ipairs(parent:GetDescendants()) do
+        pcall(hookRemote, obj)
+    end
+end
+
+-- Watch remote baru yang spawn belakangan
+game.DescendantAdded:Connect(function(obj)
+    pcall(hookRemote, obj)
+end)
+
+-- Jalanin scan awal
+pcall(scanAll, game)
+
+-- Utility: dump log ke console kapanpun
+getgenv().AXIOM_DUMP = function(filter)
+    print("===== AXIOM LOG DUMP =====")
+    for _, entry in ipairs(LOG) do
+        local ts, tag, name, args = entry[1], entry[2], entry[3], entry[4]
+        if not filter or name:lower():find(filter:lower()) then
+            print(string.format("[%.2f] [%s] %s => %s", ts, tag, name, table.concat(args, " | ")))
+        end
+    end
+    print("===== END DUMP =====")
+end
+
+-- Filter spesifik RE (contoh: AXIOM_WATCH("Stats") buat focus ke RE/Stats aja)
+getgenv().AXIOM_WATCH = function(keyword)
+    print("===== WATCHING: "..keyword.." =====")
+    for _, entry in ipairs(LOG) do
+        local ts, tag, name, args = entry[1], entry[2], entry[3], entry[4]
+        if name:lower():find(keyword:lower()) then
+            print(string.format("[%.2f] [%s] %s => %s", ts, tag, name, table.concat(args, " | ")))
+        end
+    end
+end
+
+print("[AXIOM] All remotes hooked. Gunakan AXIOM_DUMP() atau AXIOM_WATCH('Stats') di console.")
+
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 -- Inject ini SEBELUM aktifin script orang itu
 local oldRequire = require
