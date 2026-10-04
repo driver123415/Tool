@@ -219,3 +219,35 @@ if folderInduk then
 else
     warn("[Run-Once Dinamis] Batal: Folder induk gagal ditemukan.")
 end
+
+
+-- ------------------------------------------------------------------------------
+-- 🎯 [BAGIAN 4] EKSEKUSI virtual machine gerak mouse
+-- ------------------------------------------------------------------------------
+
+
+
+local Players = game:GetService("Players")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+local GuiService = game:GetService("GuiService")
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+local mainGui = playerGui:WaitForChild("MainGui")
+local menu = mainGui:WaitForChild("Menu")
+local leftSide = menu:WaitForChild("LeftSide")
+local monsterButton = leftSide:WaitForChild("MonsterButton")
+
+local function clickButton(button)
+    local inset = GuiService:GetGuiInset()
+    local pos = button.AbsolutePosition
+    local size = button.AbsoluteSize
+    local centerX = pos.X + size.X / 2
+    local centerY = pos.Y + size.Y / 2 + inset.Y
+
+    VirtualInputManager:SendMouseButtonEvent(centerX, centerY, 0, true, game, 0)
+    task.wait(0.1)
+    VirtualInputManager:SendMouseButtonEvent(centerX, centerY, 0, false, game, 0)
+end
+
+clickButton(monsterButton)
