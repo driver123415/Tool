@@ -1,0 +1,183 @@
+-- Script Koordinat Copy Paste (Updated & Beautified)
+local player = game.Players.LocalPlayer
+local runService = game:GetService("RunService")
+local coreGui = game:GetService("CoreGui")
+
+-- Bikin ScreenGui baru
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "ModernCoordinateGui"
+screenGui.ResetOnSpawn = false -- Biar GUI ga hilang pas mati
+
+-- Coba masukin ke CoreGui biar ga ke-detect/hilang, kalau gagal masuk ke PlayerGui
+local success = pcall(function()
+    screenGui.Parent = coreGui
+end)
+if not success then
+    screenGui.Parent = player:WaitForChild("PlayerGui")
+end
+
+-- Main Frame (Latar Belakang)
+local frame = Instance.new("Frame")
+frame.Size = UDim2.new(0, 220, 0, 160)
+frame.Position = UDim2.new(0.5, -110, 0.5, -80)
+frame.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
+frame.BorderSizePixel = 0
+frame.Parent = screenGui
+
+local frameCorner = Instance.new("UICorner")
+frameCorner.CornerRadius = UDim.new(0, 8)
+frameCorner.Parent = frame
+
+-- Top Bar (Untuk area Drag)
+local topBar = Instance.new("Frame")
+topBar.Size = UDim2.new(1, 0, 0, 30)
+topBar.BackgroundColor3 = Color3.fromRGB(45, 45, 50)
+topBar.BorderSizePixel = 0
+topBar.Parent = frame
+
+local topBarCorner = Instance.new("UICorner")
+topBarCorner.CornerRadius = UDim.new(0, 8)
+topBarCorner.Parent = topBar
+
+-- Tutupi sudut bawah TopBar agar menyatu dengan Frame utama
+local topBarHider = Instance.new("Frame")
+topBarHider.Size = UDim2.new(1, 0, 0, 10)
+topBarHider.Position = UDim2.new(0, 0, 1, -10)
+topBarHider.BackgroundColor3 = Color3.fromRGB(45, 45, 50)
+topBarHider.BorderSizePixel = 0
+topBarHider.Parent = topBar
+
+-- Judul di Top Bar
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, -40, 1, 0)
+title.Position = UDim2.new(0, 10, 0, 0)
+title.BackgroundTransparency = 1
+title.Text = "Player Coordinates"
+title.TextColor3 = Color3.fromRGB(255, 255, 255)
+title.Font = Enum.Font.GothamBold
+title.TextSize = 14
+title.TextXAlignment = Enum.TextXAlignment.Left
+title.Parent = topBar
+
+-- Tombol Close (X)
+local closeButton = Instance.new("TextButton")
+closeButton.Size = UDim2.new(0, 30, 0, 30)
+closeButton.Position = UDim2.new(1, -30, 0, 0)
+closeButton.BackgroundTransparency = 1
+closeButton.Text = "X"
+closeButton.TextColor3 = Color3.fromRGB(255, 85, 85)
+closeButton.Font = Enum.Font.GothamBold
+closeButton.TextSize = 16
+closeButton.Parent = topBar
+
+-- Label Koordinat
+local coordLabel = Instance.new("TextLabel")
+coordLabel.Size = UDim2.new(1, -20, 0, 70)
+coordLabel.Position = UDim2.new(0, 10, 0, 40)
+coordLabel.BackgroundTransparency = 1
+coordLabel.Text = "X: 0.00\nY: 0.00\nZ: 0.00"
+coordLabel.TextColor3 = Color3.fromRGB(220, 220, 220)
+coordLabel.Font = Enum.Font.Code
+coordLabel.TextSize = 18
+coordLabel.TextYAlignment = Enum.TextYAlignment.Center
+coordLabel.Parent = frame
+
+-- Tombol Copy
+local copyButton = Instance.new("TextButton")
+copyButton.Size = UDim2.new(1, -20, 0, 35)
+copyButton.Position = UDim2.new(0, 10, 1, -45)
+copyButton.BackgroundColor3 = Color3.fromRGB(70, 130, 180)
+copyButton.Text = "Copy Coordinates"
+copyButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+copyButton.Font = Enum.Font.GothamSemibold
+copyButton.TextSize = 14
+copyButton.AutoButtonColor = true
+copyButton.Parent = frame
+
+local copyBtnCorner = Instance.new("UICorner")
+copyBtnCorner.CornerRadius = UDim.new(0, 6)
+copyBtnCorner.Parent = copyButton
+
+-- Update Koordinat Logic
+local updateConnection
+updateConnection = runService.RenderStepped:Connect(function()
+    local char = player.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    
+    if hrp then
+        local pos = hrp.Position
+        coordLabel.Text = string.format("X: %.2f\nY: %.2f\nZ: %.2f", pos.X, pos.Y, pos.Z)
+    else
+        coordLabel.Text = "X: --\nY: --\nZ: --"
+    end
+end)
+
+-- Fungsi Copy
+local isCopying = false
+copyButton.MouseButton1Click:Connect(function()
+    if isCopying then return end
+    
+    local char = player.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    
+    if hrp then
+        isCopying = true
+        local pos = hrp.Position
+        local coordString = string.format("%.2f, %.2f, %.2f", pos.X, pos.Y, pos.Z)
+        
+        -- Copy ke clipboard
+        if setclipboard then
+            setclipboard(coordString)
+        end
+        
+        -- Ubah warna dan teks tombol sementara
+        copyButton.BackgroundColor3 = Color3.fromRGB(46, 204, 113) -- Warna hijau
+        copyButton.Text = "Copied to Clipboard!"
+        
+        task.wait(1.5)
+        
+        -- Kembalikan tombol seperti semula
+        copyButton.BackgroundColor3 = Color3.fromRGB(70, 130, 180)
+        copyButton.Text = "Copy Coordinates"
+        isCopying = false
+    end
+end)
+
+-- Fungsi Close
+closeButton.MouseButton1Click:Connect(function()
+    if updateConnection then
+        updateConnection:Disconnect() -- Hentikan loop render agar tidak ngelag
+    end
+    screenGui:Destroy()
+end)
+
+-- Smooth Dragging Logic (Diarahkan ke TopBar)
+local dragging = false
+local dragInput, mousePos, framePos
+
+topBar.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        mousePos = input.Position
+        framePos = frame.Position
+        
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                dragging = false
+            end
+        end)
+    end
+end)
+
+topBar.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+        dragInput = input
+    end
+end)
+
+game:GetService("UserInputService").InputChanged:Connect(function(input)
+    if input == dragInput and dragging then
+        local delta = input.Position - mousePos
+        frame.Position = UDim2.new(framePos.X.Scale, framePos.X.Offset + delta.X, framePos.Y.Scale, framePos.Y.Offset + delta.Y)
+    end
+end)
