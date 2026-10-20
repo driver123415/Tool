@@ -1,0 +1,65 @@
+-- ==========================================
+-- SCRIPT PENYADAP V3 (SAVE KE FOLDER KHUSUS)
+-- ==========================================
+
+-- Nama folder tempat menyimpan hasil sadapan
+local folderName = "Hasil_Sadapan"
+
+-- Otomatis membuat folder jika belum ada
+if makefolder then
+    pcall(makefolder, folderName)
+end
+
+local old_loadstring = loadstring
+getgenv().loadstring = function(code, chunkname)
+    print("\n[🔥 LOADSTRING TERTANGKAP 🔥]")
+    if chunkname then print("Chunk Name:", chunkname) end
+    
+    -- Simpan ke dalam folder yang sudah dibuat
+    if writefile then
+        -- Format nama: workspace/Hasil_Sadapan/Script_Acak.lua
+        local filename = folderName .. "/Script_" .. tostring(math.random(10000, 99999)) .. ".lua"
+        
+        -- Pakai pcall untuk menghindari error jika executor bermasalah dengan path
+        local success, err = pcall(function()
+            writefile(filename, tostring(code))
+        end)
+        
+        if success then
+            warn("[+] Script disimpan di: workspace/" .. filename)
+        else
+            warn("[-] Gagal menyimpan script: ", err)
+        end
+    end
+    
+    if setclipboard then
+        setclipboard(tostring(code))
+    end
+    
+    return old_loadstring(code, chunkname)
+end
+
+local old_namecall
+old_namecall = hookmetamethod(game, "__namecall", function(self, ...)
+    local method = getnamecallmethod()
+    local args = {...}
+    
+    if (method == "HttpGet" or method == "HttpGetAsync") and self == game then
+        print("\n[🌐 HTTPGET TERTANGKAP 🌐]")
+        print("Target URL:", args[1])
+        
+        if writefile then
+            local urlFilename = folderName .. "/URL_" .. tostring(math.random(10000, 99999)) .. ".txt"
+            
+            pcall(function()
+                writefile(urlFilename, tostring(args[1]))
+                warn("[+] URL disimpan di: workspace/" .. urlFilename)
+            end)
+        end
+    end
+    
+    return old_namecall(self, ...)
+end)
+
+print("[*] Penyadap V3 Aktif! Folder penyimpanan: workspace/" .. folderName)
+print("[*] Sekarang jalankan script targetmu...")
