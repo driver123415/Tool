@@ -1,0 +1,1515 @@
+--Custom Part ESP And Spectator Mode
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+
+local LocalPlayer = Players.LocalPlayer
+local Camera = workspace.CurrentCamera
+local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
+
+-- Hapus GUI lama jika script dijalankan ulang
+if PlayerGui:FindFirstChild("UnifiedESP_SpectateGUI") then
+	PlayerGui.UnifiedESP_SpectateGUI:Destroy()
+end
+
+-- ==========================================
+-- 1. STATE & KONFIGURASI AWAL
+-- ==========================================
+local espEnabled = true
+local lineEnabled = true
+local isSpectating = false
+local isPickingTarget = false
+local selectedPlayer = nil
+local lastEspPlayer = nil
+
+-- Konfigurasi Target ESP Utama
+local targetKeyword = "Pumpkin"
+local targetMatchMode = "Name" -- "Name", "Player", "MeshId", atau "Size"
+local targetMeshId = nil
+local targetRefSize = nil
+
+-- Konfigurasi Multi-ESP Koordinat (Waypoints)
+local coordEspEnabled = true
+local waypoints = {} -- Menyimpan banyak titik koordinat
+local waypointCounter = 0
+
+-- Palet warna otomatis untuk membedakan tiap titik koordinat (Pin 1, 2, 3, dst.)
+local pinPalette = {
+	Color3.fromRGB(0, 235, 255),   -- Cyan
+	Color3.fromRGB(80, 255, 120),  -- Hijau Neon
+	Color3.fromRGB(255, 220, 50),  -- Kuning Emas
+	Color3.fromRGB(255, 90, 220),  -- Magenta
+	Color3.fromRGB(160, 110, 255), -- Ungu Muda
+	Color3.fromRGB(255, 110, 90),  -- Coral
+	Color3.fromRGB(90, 175, 255),  -- Biru Langit
+	Color3.fromRGB(180, 255, 60)   -- Lime
+}
+
+local MIN_DIST = 10
+local MAX_DIST = 1500
+local maxEspDistance = 300
+
+local camModes = {"Free Orbit", "Lock POV (Kepala)", "Lock Back (Belakang)"}
+local currentCamMode = 2
+
+local trackedObjects = {}
+local connections = {}
+
+local genericPartNames = {
+	["part"] = true, ["meshpart"] = true, ["unionoperation"] = true,
+	["union"] = true, ["handle"] = true, ["base"] = true,
+	["hitbox"] = true, ["primary"] = true, ["main"] = true,
+	["model"] = true, ["mesh"] = true, ["body"] = true,
+	["wedgepart"] = true, ["cylinder"] = true, ["cube"] = true
+}
+
+-- ==========================================
+-- 2. PEMBUATAN GUI UTAMA
+-- ==========================================
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "UnifiedESP_SpectateGUI"
+screenGui.ResetOnSpawn = false
+screenGui.IgnoreGuiInset = true
+screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+screenGui.Parent = PlayerGui
+
+local lineContainer = Instance.new("Folder")
+lineContainer.Name = "TracerLines"
+lineContainer.Parent = screenGui
+
+local waypointFolder = workspace:FindFirstChild("ESP_WaypointsFolder")
+if waypointFolder then waypointFolder:Destroy() end
+waypointFolder = Instance.new("Folder")
+waypointFolder.Name = "ESP_WaypointsFolder"
+waypointFolder.Parent = workspace
+
+-- Highlight Preview saat Hover Mouse (Mode Pick)
+local hoverHighlight = Instance.new("Highlight")
+hoverHighlight.Name = "HoverPreviewHighlight"
+hoverHighlight.FillColor = Color3.fromRGB(0, 200, 255)
+hoverHighlight.OutlineColor = Color3.fromRGB(255, 255, 255)
+hoverHighlight.FillTransparency = 0.35
+hoverHighlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+hoverHighlight.Enabled = false
+hoverHighlight.Parent = screenGui
+
+local mainFrame = Instance.new("Frame")
+mainFrame.Size = UDim2.fromOffset(325, 540)
+mainFrame.Position = UDim2.new(0.5, -162, 0.5, -270)
+mainFrame.BackgroundColor3 = Color3.fromRGB(22, 22, 28)
+mainFrame.BorderSizePixel = 0
+mainFrame.Parent = screenGui
+Instance.new("UICorner", mainFrame).CornerRadius = UDim.new(0, 8)
+
+-- Top Bar
+local topBar = Instance.new("Frame")
+topBar.Size = UDim2.new(1, 0, 0, 32)
+topBar.BackgroundColor3 = Color3.fromRGB(32, 32, 42)
+topBar.BorderSizePixel = 0
+topBar.Parent = mainFrame
+Instance.new("UICorner", topBar).CornerRadius = UDim.new(0, 8)
+
+local titleLabel = Instance.new("TextLabel")
+titleLabel.Size = UDim2.new(1, -45, 1, 0)
+titleLabel.Position = UDim2.fromOffset(12, 0)
+titleLabel.BackgroundTransparency = 1
+titleLabel.Text = "🎯 Universal ESP, Multi-Coord & Spectate"
+titleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+titleLabel.Font = Enum.Font.GothamBold
+titleLabel.TextSize = 12
+titleLabel.TextXAlignment = Enum.TextXAlignment.Left
+titleLabel.Parent = topBar
+
+local closeBtn = Instance.new("TextButton")
+closeBtn.Size = UDim2.fromOffset(24, 24)
+closeBtn.Position = UDim2.new(1, -28, 0, 4)
+closeBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+closeBtn.Text = "X"
+closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+closeBtn.Font = Enum.Font.GothamBold
+closeBtn.TextSize = 12
+closeBtn.Parent = topBar
+Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0, 6)
+
+-- Sistem Drag GUI
+local dragging, dragInput, dragStart, startPos
+table.insert(connections, topBar.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+		dragging = true
+		dragStart = input.Position
+		startPos = mainFrame.Position
+		input.Changed:Connect(function()
+			if input.UserInputState == Enum.UserInputState.End then
+				dragging = false
+			end
+		end)
+	end
+end))
+
+table.insert(connections, topBar.InputChanged:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+		dragInput = input
+	end
+end))
+
+table.insert(connections, UserInputService.InputChanged:Connect(function(input)
+	if input == dragInput and dragging then
+		local delta = input.Position - dragStart
+		mainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+	end
+end))
+
+-- ==========================================
+-- 3. KONTROL TARGET ESP & SLIDER JARAK
+-- ==========================================
+local espBtn = Instance.new("TextButton")
+espBtn.Size = UDim2.new(0.48, -12, 0, 26)
+espBtn.Position = UDim2.fromOffset(10, 38)
+espBtn.BackgroundColor3 = Color3.fromRGB(40, 150, 80)
+espBtn.Text = "ESP Box: ON"
+espBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+espBtn.Font = Enum.Font.GothamBold
+espBtn.TextSize = 11
+espBtn.Parent = mainFrame
+Instance.new("UICorner", espBtn).CornerRadius = UDim.new(0, 6)
+
+local lineBtn = Instance.new("TextButton")
+lineBtn.Size = UDim2.new(0.48, -12, 0, 26)
+lineBtn.Position = UDim2.new(0.52, 2, 0, 38)
+lineBtn.BackgroundColor3 = Color3.fromRGB(40, 150, 80)
+lineBtn.Text = "ESP Line: ON"
+lineBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+lineBtn.Font = Enum.Font.GothamBold
+lineBtn.TextSize = 11
+lineBtn.Parent = mainFrame
+Instance.new("UICorner", lineBtn).CornerRadius = UDim.new(0, 6)
+
+local pickTargetBtn = Instance.new("TextButton")
+pickTargetBtn.Size = UDim2.new(1, -20, 0, 28)
+pickTargetBtn.Position = UDim2.fromOffset(10, 68)
+pickTargetBtn.BackgroundColor3 = Color3.fromRGB(210, 120, 20)
+pickTargetBtn.Text = "🎯 Set Target (Klik Benda / Player)"
+pickTargetBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+pickTargetBtn.Font = Enum.Font.GothamBold
+pickTargetBtn.TextSize = 11
+pickTargetBtn.Parent = mainFrame
+Instance.new("UICorner", pickTargetBtn).CornerRadius = UDim.new(0, 6)
+
+local targetNameTitle = Instance.new("TextLabel")
+targetNameTitle.Size = UDim2.fromOffset(85, 22)
+targetNameTitle.Position = UDim2.fromOffset(10, 100)
+targetNameTitle.BackgroundTransparency = 1
+targetNameTitle.Text = "Nama Target:"
+targetNameTitle.TextColor3 = Color3.fromRGB(220, 220, 230)
+targetNameTitle.Font = Enum.Font.GothamSemibold
+targetNameTitle.TextSize = 11
+targetNameTitle.TextXAlignment = Enum.TextXAlignment.Left
+targetNameTitle.Parent = mainFrame
+
+local targetNameInput = Instance.new("TextBox")
+targetNameInput.Size = UDim2.new(1, -105, 0, 22)
+targetNameInput.Position = UDim2.fromOffset(95, 100)
+targetNameInput.BackgroundColor3 = Color3.fromRGB(38, 38, 50)
+targetNameInput.Text = targetKeyword
+targetNameInput.PlaceholderText = "Ketik nama benda/player..."
+targetNameInput.TextColor3 = Color3.fromRGB(100, 220, 255)
+targetNameInput.Font = Enum.Font.GothamBold
+targetNameInput.TextSize = 11
+targetNameInput.ClearTextOnFocus = false
+targetNameInput.Parent = mainFrame
+Instance.new("UICorner", targetNameInput).CornerRadius = UDim.new(0, 5)
+
+local countLabel = Instance.new("TextLabel")
+countLabel.Size = UDim2.new(1, -20, 0, 16)
+countLabel.Position = UDim2.fromOffset(10, 125)
+countLabel.BackgroundTransparency = 1
+countLabel.Text = "Terdeteksi: 0 Terlihat / 0 Total"
+countLabel.TextColor3 = Color3.fromRGB(255, 180, 50)
+countLabel.Font = Enum.Font.GothamSemibold
+countLabel.TextSize = 11
+countLabel.TextXAlignment = Enum.TextXAlignment.Left
+countLabel.Parent = mainFrame
+
+local distTitle = Instance.new("TextLabel")
+distTitle.Size = UDim2.new(1, -95, 0, 20)
+distTitle.Position = UDim2.fromOffset(10, 143)
+distTitle.BackgroundTransparency = 1
+distTitle.Text = "Batas Jarak ESP (m):"
+distTitle.TextColor3 = Color3.fromRGB(220, 220, 230)
+distTitle.Font = Enum.Font.GothamSemibold
+distTitle.TextSize = 11
+distTitle.TextXAlignment = Enum.TextXAlignment.Left
+distTitle.Parent = mainFrame
+
+local distInput = Instance.new("TextBox")
+distInput.Size = UDim2.fromOffset(70, 20)
+distInput.Position = UDim2.new(1, -80, 0, 143)
+distInput.BackgroundColor3 = Color3.fromRGB(38, 38, 50)
+distInput.Text = tostring(maxEspDistance)
+distInput.TextColor3 = Color3.fromRGB(255, 200, 80)
+distInput.Font = Enum.Font.GothamBold
+distInput.TextSize = 11
+distInput.ClearTextOnFocus = false
+distInput.Parent = mainFrame
+Instance.new("UICorner", distInput).CornerRadius = UDim.new(0, 5)
+
+local sliderBg = Instance.new("Frame")
+sliderBg.Size = UDim2.new(1, -20, 0, 10)
+sliderBg.Position = UDim2.fromOffset(10, 168)
+sliderBg.BackgroundColor3 = Color3.fromRGB(40, 40, 52)
+sliderBg.BorderSizePixel = 0
+sliderBg.Parent = mainFrame
+Instance.new("UICorner", sliderBg).CornerRadius = UDim.new(1, 0)
+
+local sliderFill = Instance.new("Frame")
+local initialRatio = math.clamp((maxEspDistance - MIN_DIST) / (MAX_DIST - MIN_DIST), 0, 1)
+sliderFill.Size = UDim2.new(initialRatio, 0, 1, 0)
+sliderFill.BackgroundColor3 = Color3.fromRGB(255, 145, 0)
+sliderFill.BorderSizePixel = 0
+sliderFill.Parent = sliderBg
+Instance.new("UICorner", sliderFill).CornerRadius = UDim.new(1, 0)
+
+local sliderKnob = Instance.new("Frame")
+sliderKnob.Size = UDim2.fromOffset(14, 14)
+sliderKnob.AnchorPoint = Vector2.new(0.5, 0.5)
+sliderKnob.Position = UDim2.new(initialRatio, 0, 0.5, 0)
+sliderKnob.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+sliderKnob.BorderSizePixel = 0
+sliderKnob.Parent = sliderBg
+Instance.new("UICorner", sliderKnob).CornerRadius = UDim.new(1, 0)
+
+local function setMaxDistance(val, updateTextBox)
+	maxEspDistance = math.clamp(math.floor(val), MIN_DIST, MAX_DIST)
+	local ratio = math.clamp((maxEspDistance - MIN_DIST) / (MAX_DIST - MIN_DIST), 0, 1)
+	sliderFill.Size = UDim2.new(ratio, 0, 1, 0)
+	sliderKnob.Position = UDim2.new(ratio, 0, 0.5, 0)
+	if updateTextBox then
+		distInput.Text = tostring(maxEspDistance)
+	end
+end
+
+local draggingSlider = false
+local function updateSliderFromInput(input)
+	local relX = input.Position.X - sliderBg.AbsolutePosition.X
+	local ratio = math.clamp(relX / sliderBg.AbsoluteSize.X, 0, 1)
+	local value = MIN_DIST + (MAX_DIST - MIN_DIST) * ratio
+	setMaxDistance(value, true)
+end
+
+table.insert(connections, sliderBg.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+		draggingSlider = true
+		updateSliderFromInput(input)
+	end
+end))
+
+table.insert(connections, UserInputService.InputEnded:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+		draggingSlider = false
+	end
+end))
+
+table.insert(connections, UserInputService.InputChanged:Connect(function(input)
+	if draggingSlider and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+		updateSliderFromInput(input)
+	end
+end))
+
+table.insert(connections, distInput.FocusLost:Connect(function()
+	local num = tonumber(distInput.Text)
+	if num then
+		maxEspDistance = math.max(1, math.floor(num))
+		local ratio = math.clamp((maxEspDistance - MIN_DIST) / (MAX_DIST - MIN_DIST), 0, 1)
+		sliderFill.Size = UDim2.new(ratio, 0, 1, 0)
+		sliderKnob.Position = UDim2.new(ratio, 0, 0.5, 0)
+		distInput.Text = tostring(maxEspDistance)
+	else
+		distInput.Text = tostring(maxEspDistance)
+	end
+end))
+
+-- ==========================================
+-- 4. FITUR MULTI-KOORDINAT (MULTI WAYPOINT PIN)
+-- ==========================================
+-- Kolom Input Nama Pin & Input Koordinat Manual
+local pinNameInput = Instance.new("TextBox")
+pinNameInput.Size = UDim2.new(0.42, -10, 0, 24)
+pinNameInput.Position = UDim2.fromOffset(10, 186)
+pinNameInput.BackgroundColor3 = Color3.fromRGB(34, 34, 46)
+pinNameInput.Text = ""
+pinNameInput.PlaceholderText = "Nama Pin (Bebas)..."
+pinNameInput.TextColor3 = Color3.fromRGB(255, 230, 110)
+pinNameInput.Font = Enum.Font.GothamBold
+pinNameInput.TextSize = 11
+pinNameInput.ClearTextOnFocus = false
+pinNameInput.Parent = mainFrame
+Instance.new("UICorner", pinNameInput).CornerRadius = UDim.new(0, 5)
+
+local coordInput = Instance.new("TextBox")
+coordInput.Size = UDim2.new(0.40, -6, 0, 24)
+coordInput.Position = UDim2.new(0.42, 4, 0, 186)
+coordInput.BackgroundColor3 = Color3.fromRGB(34, 34, 46)
+coordInput.Text = ""
+coordInput.PlaceholderText = "X, Y, Z"
+coordInput.TextColor3 = Color3.fromRGB(0, 235, 255)
+coordInput.Font = Enum.Font.GothamBold
+coordInput.TextSize = 11
+coordInput.ClearTextOnFocus = false
+coordInput.Parent = mainFrame
+Instance.new("UICorner", coordInput).CornerRadius = UDim.new(0, 5)
+
+local addManualPinBtn = Instance.new("TextButton")
+addManualPinBtn.Size = UDim2.new(0.18, -12, 0, 24)
+addManualPinBtn.Position = UDim2.new(0.82, 2, 0, 186)
+addManualPinBtn.BackgroundColor3 = Color3.fromRGB(40, 150, 90)
+addManualPinBtn.Text = "+ Set"
+addManualPinBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+addManualPinBtn.Font = Enum.Font.GothamBold
+addManualPinBtn.TextSize = 11
+addManualPinBtn.Parent = mainFrame
+Instance.new("UICorner", addManualPinBtn).CornerRadius = UDim.new(0, 5)
+
+-- Tombol Copy & Tambah Pin dari Target ESP atau Posisi Sendiri
+local addTargetPinBtn = Instance.new("TextButton")
+addTargetPinBtn.Size = UDim2.new(0.55, -12, 0, 26)
+addTargetPinBtn.Position = UDim2.fromOffset(10, 214)
+addTargetPinBtn.BackgroundColor3 = Color3.fromRGB(0, 135, 175)
+addTargetPinBtn.Text = "📍 + Pin Target / Player"
+addTargetPinBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+addTargetPinBtn.Font = Enum.Font.GothamBold
+addTargetPinBtn.TextSize = 11
+addTargetPinBtn.Parent = mainFrame
+Instance.new("UICorner", addTargetPinBtn).CornerRadius = UDim.new(0, 6)
+
+local addSelfPinBtn = Instance.new("TextButton")
+addSelfPinBtn.Size = UDim2.new(0.45, -12, 0, 26)
+addSelfPinBtn.Position = UDim2.new(0.55, 2, 0, 214)
+addSelfPinBtn.BackgroundColor3 = Color3.fromRGB(80, 110, 175)
+addSelfPinBtn.Text = "📌 + Pin Posisi Saya"
+addSelfPinBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+addSelfPinBtn.Font = Enum.Font.GothamBold
+addSelfPinBtn.TextSize = 11
+addSelfPinBtn.Parent = mainFrame
+Instance.new("UICorner", addSelfPinBtn).CornerRadius = UDim.new(0, 6)
+
+-- Header Daftar Pin + Tombol ON/OFF Semua Pin + Hapus Semua
+local pinListHeader = Instance.new("TextLabel")
+pinListHeader.Size = UDim2.fromOffset(135, 22)
+pinListHeader.Position = UDim2.fromOffset(10, 244)
+pinListHeader.BackgroundTransparency = 1
+pinListHeader.Text = "Daftar Pin (Klik Nama=Edit):"
+pinListHeader.TextColor3 = Color3.fromRGB(200, 220, 240)
+pinListHeader.Font = Enum.Font.GothamSemibold
+pinListHeader.TextSize = 10
+pinListHeader.TextXAlignment = Enum.TextXAlignment.Left
+pinListHeader.Parent = mainFrame
+
+local toggleCoordEspBtn = Instance.new("TextButton")
+toggleCoordEspBtn.Size = UDim2.fromOffset(82, 20)
+toggleCoordEspBtn.Position = UDim2.new(1, -162, 0, 245)
+toggleCoordEspBtn.BackgroundColor3 = Color3.fromRGB(35, 140, 140)
+toggleCoordEspBtn.Text = "Pin ESP: ON"
+toggleCoordEspBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+toggleCoordEspBtn.Font = Enum.Font.GothamBold
+toggleCoordEspBtn.TextSize = 10
+toggleCoordEspBtn.Parent = mainFrame
+Instance.new("UICorner", toggleCoordEspBtn).CornerRadius = UDim.new(0, 4)
+
+local clearAllPinsBtn = Instance.new("TextButton")
+clearAllPinsBtn.Size = UDim2.fromOffset(66, 20)
+clearAllPinsBtn.Position = UDim2.new(1, -76, 0, 245)
+clearAllPinsBtn.BackgroundColor3 = Color3.fromRGB(140, 50, 50)
+clearAllPinsBtn.Text = "Hapus Semua"
+clearAllPinsBtn.TextColor3 = Color3.fromRGB(255, 220, 220)
+clearAllPinsBtn.Font = Enum.Font.GothamBold
+clearAllPinsBtn.TextSize = 10
+clearAllPinsBtn.Parent = mainFrame
+Instance.new("UICorner", clearAllPinsBtn).CornerRadius = UDim.new(0, 4)
+
+-- ScrollingFrame untuk Daftar Banyak Koordinat (Bisa 6, 7, atau lebih)
+local waypointListFrame = Instance.new("ScrollingFrame")
+waypointListFrame.Size = UDim2.new(1, -20, 0, 118)
+waypointListFrame.Position = UDim2.fromOffset(10, 268)
+waypointListFrame.BackgroundColor3 = Color3.fromRGB(16, 16, 22)
+waypointListFrame.BorderSizePixel = 1
+waypointListFrame.BorderColor3 = Color3.fromRGB(50, 50, 68)
+waypointListFrame.ScrollBarThickness = 4
+waypointListFrame.CanvasSize = UDim2.fromOffset(0, 0)
+waypointListFrame.Parent = mainFrame
+Instance.new("UICorner", waypointListFrame).CornerRadius = UDim.new(0, 6)
+
+local wpListLayout = Instance.new("UIListLayout")
+wpListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+wpListLayout.Padding = UDim.new(0, 3)
+wpListLayout.Parent = waypointListFrame
+
+-- ==========================================
+-- 5. KONTROL SPECTATE & DROPDOWN
+-- ==========================================
+local dropdownBtn = Instance.new("TextButton")
+dropdownBtn.Size = UDim2.new(1, -20, 0, 28)
+dropdownBtn.Position = UDim2.fromOffset(10, 394)
+dropdownBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 58)
+dropdownBtn.Text = "Pilih Player (Dropdown) ▼"
+dropdownBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+dropdownBtn.Font = Enum.Font.GothamSemibold
+dropdownBtn.TextSize = 11
+dropdownBtn.TextTruncate = Enum.TextTruncate.AtEnd
+dropdownBtn.Parent = mainFrame
+Instance.new("UICorner", dropdownBtn).CornerRadius = UDim.new(0, 6)
+
+local camModeBtn = Instance.new("TextButton")
+camModeBtn.Size = UDim2.new(1, -20, 0, 28)
+camModeBtn.Position = UDim2.fromOffset(10, 428)
+camModeBtn.BackgroundColor3 = Color3.fromRGB(50, 90, 150)
+camModeBtn.Text = "Cam Mode: " .. camModes[currentCamMode]
+camModeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+camModeBtn.Font = Enum.Font.GothamBold
+camModeBtn.TextSize = 11
+camModeBtn.Parent = mainFrame
+Instance.new("UICorner", camModeBtn).CornerRadius = UDim.new(0, 6)
+
+local spectateBtn = Instance.new("TextButton")
+spectateBtn.Size = UDim2.new(1, -20, 0, 30)
+spectateBtn.Position = UDim2.fromOffset(10, 462)
+spectateBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 75)
+spectateBtn.Text = "Spectate: OFF (Normal)"
+spectateBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+spectateBtn.Font = Enum.Font.GothamBold
+spectateBtn.TextSize = 11
+spectateBtn.Parent = mainFrame
+Instance.new("UICorner", spectateBtn).CornerRadius = UDim.new(0, 6)
+
+local statusLabel = Instance.new("TextLabel")
+statusLabel.Size = UDim2.new(1, -20, 0, 22)
+statusLabel.Position = UDim2.fromOffset(10, 498)
+statusLabel.BackgroundTransparency = 1
+statusLabel.Text = "Status: Siap digunakan"
+statusLabel.TextColor3 = Color3.fromRGB(180, 180, 190)
+statusLabel.Font = Enum.Font.Gotham
+statusLabel.TextSize = 11
+statusLabel.TextTruncate = Enum.TextTruncate.AtEnd
+statusLabel.Parent = mainFrame
+
+local dropdownList = Instance.new("ScrollingFrame")
+dropdownList.Size = UDim2.new(1, -20, 0, 110)
+dropdownList.Position = UDim2.fromOffset(10, 424)
+dropdownList.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
+dropdownList.BorderSizePixel = 1
+dropdownList.BorderColor3 = Color3.fromRGB(80, 80, 100)
+dropdownList.ScrollBarThickness = 4
+dropdownList.Visible = false
+dropdownList.ZIndex = 10
+dropdownList.Parent = mainFrame
+Instance.new("UICorner", dropdownList).CornerRadius = UDim.new(0, 6)
+
+local uiListLayout = Instance.new("UIListLayout")
+uiListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+uiListLayout.Padding = UDim.new(0, 2)
+uiListLayout.Parent = dropdownList
+
+-- ==========================================
+-- 6. MANAJEMEN MULTI-WAYPOINT (BANYAK PIN & CUSTOM NAMA)
+-- ==========================================
+local function getRelativeDirectionInfo(targetPos)
+	local camCF = Camera.CFrame
+	local flatLook = Vector3.new(camCF.LookVector.X, 0, camCF.LookVector.Z)
+	local flatRight = Vector3.new(camCF.RightVector.X, 0, camCF.RightVector.Z)
+	local offset = targetPos - camCF.Position
+	local flatOffset = Vector3.new(offset.X, 0, offset.Z)
+
+	if flatOffset.Magnitude < 2 then
+		return "🎯 Tepat", "🎯"
+	end
+
+	flatLook = flatLook.Unit
+	flatRight = flatRight.Unit
+	flatOffset = flatOffset.Unit
+
+	local forwardDot = flatLook:Dot(flatOffset)
+	local rightDot = flatRight:Dot(flatOffset)
+	local angle = math.deg(math.atan2(rightDot, forwardDot))
+
+	local vertHint = ""
+	if offset.Y > 8 then
+		vertHint = "↑"
+	elseif offset.Y < -8 then
+		vertHint = "↓"
+	end
+
+	if angle >= -22.5 and angle <= 22.5 then
+		return "⬆️ Depan" .. vertHint, "⬆️"
+	elseif angle > 22.5 and angle <= 67.5 then
+		return "↗️ Kanan-Dpn" .. vertHint, "↗️"
+	elseif angle > 67.5 and angle <= 112.5 then
+		return "➡️ Kanan" .. vertHint, "➡️"
+	elseif angle > 112.5 and angle <= 157.5 then
+		return "↘️ Kanan-Blk" .. vertHint, "↘️"
+	elseif angle < -22.5 and angle >= -67.5 then
+		return "↖️ Kiri-Dpn" .. vertHint, "↖️"
+	elseif angle < -67.5 and angle >= -112.5 then
+		return "⬅️ Kiri" .. vertHint, "⬅️"
+	elseif angle < -112.5 and angle >= -157.5 then
+		return "↙️ Kiri-Blk" .. vertHint, "↙️"
+	else
+		return "⬇️ Belakang" .. vertHint, "⬇️"
+	end
+end
+
+local function updateWaypointCanvasSize()
+	waypointListFrame.CanvasSize = UDim2.fromOffset(0, #waypoints * 29 + 4)
+	pinListHeader.Text = string.format("Daftar Pin (%d) - Klik Nama=Edit:", #waypoints)
+end
+
+local function removeSingleWaypoint(wpData)
+	if wpData.markerPart then wpData.markerPart:Destroy() end
+	if wpData.lineFrame then wpData.lineFrame:Destroy() end
+	if wpData.rowFrame then wpData.rowFrame:Destroy() end
+
+	for i, item in ipairs(waypoints) do
+		if item == wpData then
+			table.remove(waypoints, i)
+			break
+		end
+	end
+	updateWaypointCanvasSize()
+end
+
+local function clearAllWaypoints()
+	for i = #waypoints, 1, -1 do
+		local wp = waypoints[i]
+		if wp.markerPart then wp.markerPart:Destroy() end
+		if wp.lineFrame then wp.lineFrame:Destroy() end
+		if wp.rowFrame then wp.rowFrame:Destroy() end
+	end
+	table.clear(waypoints)
+	updateWaypointCanvasSize()
+end
+
+local function addWaypointPin(vec3, defaultName)
+	waypointCounter += 1
+	local color = pinPalette[((waypointCounter - 1) % #pinPalette) + 1]
+
+	-- Gunakan nama dari kotak input jika diisi, jika kosong gunakan defaultName
+	local customName = pinNameInput.Text:gsub("^%s*(.-)%s*$", "%1")
+	if #customName == 0 then
+		customName = defaultName or ("Pin #" .. tostring(waypointCounter))
+	end
+	pinNameInput.Text = "" -- Kosongkan kembali agar siap untuk pin berikutnya
+
+	local formattedCoord = string.format("%.1f, %.1f, %.1f", vec3.X, vec3.Y, vec3.Z)
+	coordInput.Text = formattedCoord
+
+	if typeof(setclipboard) == "function" then
+		pcall(setclipboard, formattedCoord)
+	end
+
+	-- 1. Buat Objek Part & Highlight di Dunia 3D
+	local markerPart = Instance.new("Part")
+	markerPart.Name = "ESP_Waypoint_" .. tostring(waypointCounter)
+	markerPart.Size = Vector3.new(1.4, 3.8, 1.4)
+	markerPart.Position = vec3
+	markerPart.Anchored = true
+	markerPart.CanCollide = false
+	markerPart.CanQuery = false
+	markerPart.Transparency = 0.35
+	markerPart.Color = color
+	markerPart.Material = Enum.Material.Neon
+	markerPart.Parent = waypointFolder
+
+	local highlight = Instance.new("Highlight")
+	highlight.Adornee = markerPart
+	highlight.FillColor = color
+	highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
+	highlight.FillTransparency = 0.25
+	highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+	highlight.Parent = markerPart
+
+	local billboard = Instance.new("BillboardGui")
+	billboard.Adornee = markerPart
+	billboard.Size = UDim2.fromOffset(190, 44)
+	billboard.StudsOffset = Vector3.new(0, 3.2, 0)
+	billboard.AlwaysOnTop = true
+	billboard.Parent = markerPart
+
+	local textLabel = Instance.new("TextLabel")
+	textLabel.Size = UDim2.fromScale(1, 1)
+	textLabel.BackgroundTransparency = 1
+	textLabel.Text = "📍 " .. customName
+	textLabel.TextColor3 = color
+	textLabel.TextStrokeTransparency = 0
+	textLabel.Font = Enum.Font.GothamBold
+	textLabel.TextSize = 12
+	textLabel.Parent = billboard
+
+	-- 2. Buat Tracer Line 2D
+	local lineFrame = Instance.new("Frame")
+	lineFrame.Name = "CoordTracer_" .. tostring(waypointCounter)
+	lineFrame.AnchorPoint = Vector2.new(0.5, 0.5)
+	lineFrame.BackgroundColor3 = color
+	lineFrame.BorderSizePixel = 0
+	lineFrame.Visible = false
+	lineFrame.Parent = lineContainer
+
+	-- 3. Buat Baris Item di ScrollingFrame GUI (Bisa ganti nama langsung!)
+	local rowFrame = Instance.new("Frame")
+	rowFrame.Size = UDim2.new(1, -6, 0, 26)
+	rowFrame.BackgroundColor3 = Color3.fromRGB(28, 28, 38)
+	rowFrame.BorderSizePixel = 0
+	rowFrame.Parent = waypointListFrame
+	Instance.new("UICorner", rowFrame).CornerRadius = UDim.new(0, 5)
+
+	-- Indikator Warna Pin
+	local colorDot = Instance.new("Frame")
+	colorDot.Size = UDim2.fromOffset(6, 18)
+	colorDot.Position = UDim2.fromOffset(4, 4)
+	colorDot.BackgroundColor3 = color
+	colorDot.BorderSizePixel = 0
+	colorDot.Parent = rowFrame
+	Instance.new("UICorner", colorDot).CornerRadius = UDim.new(1, 0)
+
+	-- TextBox Nama Pin (Bisa diklik dan diedit kapan saja!)
+	local rowNameBox = Instance.new("TextBox")
+	rowNameBox.Size = UDim2.fromOffset(105, 20)
+	rowNameBox.Position = UDim2.fromOffset(14, 3)
+	rowNameBox.BackgroundColor3 = Color3.fromRGB(38, 38, 52)
+	rowNameBox.Text = customName
+	rowNameBox.PlaceholderText = "Nama Pin..."
+	rowNameBox.TextColor3 = color
+	rowNameBox.Font = Enum.Font.GothamBold
+	rowNameBox.TextSize = 11
+	rowNameBox.TextXAlignment = Enum.TextXAlignment.Left
+	rowNameBox.TextTruncate = Enum.TextTruncate.AtEnd
+	rowNameBox.ClearTextOnFocus = false
+	rowNameBox.Parent = rowFrame
+	Instance.new("UICorner", rowNameBox).CornerRadius = UDim.new(0, 4)
+
+	-- Label Arah & Jarak Real-time di dalam baris
+	local rowDirLabel = Instance.new("TextLabel")
+	rowDirLabel.Size = UDim2.fromOffset(100, 20)
+	rowDirLabel.Position = UDim2.fromOffset(123, 3)
+	rowDirLabel.BackgroundTransparency = 1
+	rowDirLabel.Text = "⬆️ 0m"
+	rowDirLabel.TextColor3 = Color3.fromRGB(210, 210, 220)
+	rowDirLabel.Font = Enum.Font.GothamSemibold
+	rowDirLabel.TextSize = 10
+	rowDirLabel.TextXAlignment = Enum.TextXAlignment.Left
+	rowDirLabel.TextTruncate = Enum.TextTruncate.AtEnd
+	rowDirLabel.Parent = rowFrame
+
+	-- Tombol Copy Koordinat Pin Ini
+	local copySingleBtn = Instance.new("TextButton")
+	copySingleBtn.Size = UDim2.fromOffset(22, 20)
+	copySingleBtn.Position = UDim2.new(1, -72, 0, 3)
+	copySingleBtn.BackgroundColor3 = Color3.fromRGB(45, 95, 130)
+	copySingleBtn.Text = "📋"
+	copySingleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+	copySingleBtn.Font = Enum.Font.GothamBold
+	copySingleBtn.TextSize = 10
+	copySingleBtn.Parent = rowFrame
+	Instance.new("UICorner", copySingleBtn).CornerRadius = UDim.new(0, 4)
+
+	-- Tombol Show/Hide Pin Ini Saja
+	local visSingleBtn = Instance.new("TextButton")
+	visSingleBtn.Size = UDim2.fromOffset(22, 20)
+	visSingleBtn.Position = UDim2.new(1, -47, 0, 3)
+	visSingleBtn.BackgroundColor3 = Color3.fromRGB(40, 140, 80)
+	visSingleBtn.Text = "ON"
+	visSingleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+	visSingleBtn.Font = Enum.Font.GothamBold
+	visSingleBtn.TextSize = 9
+	visSingleBtn.Parent = rowFrame
+	Instance.new("UICorner", visSingleBtn).CornerRadius = UDim.new(0, 4)
+
+	-- Tombol Hapus Pin Ini
+	local delSingleBtn = Instance.new("TextButton")
+	delSingleBtn.Size = UDim2.fromOffset(20, 20)
+	delSingleBtn.Position = UDim2.new(1, -22, 0, 3)
+	delSingleBtn.BackgroundColor3 = Color3.fromRGB(180, 50, 50)
+	delSingleBtn.Text = "X"
+	delSingleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+	delSingleBtn.Font = Enum.Font.GothamBold
+	delSingleBtn.TextSize = 10
+	delSingleBtn.Parent = rowFrame
+	Instance.new("UICorner", delSingleBtn).CornerRadius = UDim.new(0, 4)
+
+	local wpData = {
+		id = waypointCounter,
+		name = customName,
+		position = vec3,
+		color = color,
+		visible = true,
+		markerPart = markerPart,
+		highlight = highlight,
+		billboard = billboard,
+		textLabel = textLabel,
+		lineFrame = lineFrame,
+		rowFrame = rowFrame,
+		rowNameBox = rowNameBox,
+		rowDirLabel = rowDirLabel
+	}
+
+	-- Event saat nama diedit langsung di daftar GUI
+	rowNameBox:GetPropertyChangedSignal("Text"):Connect(function()
+		local newName = rowNameBox.Text:gsub("^%s*(.-)%s*$", "%1")
+		if #newName > 0 then
+			wpData.name = newName
+		end
+	end)
+
+	rowNameBox.FocusLost:Connect(function()
+		local newName = rowNameBox.Text:gsub("^%s*(.-)%s*$", "%1")
+		if #newName == 0 then
+			rowNameBox.Text = wpData.name
+		else
+			wpData.name = newName
+			statusLabel.Text = "Nama Pin diubah menjadi: " .. newName
+		end
+	end)
+
+	copySingleBtn.MouseButton1Click:Connect(function()
+		coordInput.Text = formattedCoord
+		pinNameInput.Text = wpData.name
+		if typeof(setclipboard) == "function" then
+			pcall(setclipboard, formattedCoord)
+		end
+		statusLabel.Text = "Koordinat [" .. wpData.name .. "] disalin!"
+	end)
+
+	visSingleBtn.MouseButton1Click:Connect(function()
+		wpData.visible = not wpData.visible
+		visSingleBtn.Text = wpData.visible and "ON" or "OFF"
+		visSingleBtn.BackgroundColor3 = wpData.visible and Color3.fromRGB(40, 140, 80) or Color3.fromRGB(75, 75, 90)
+	end)
+
+	delSingleBtn.MouseButton1Click:Connect(function()
+		removeSingleWaypoint(wpData)
+		statusLabel.Text = "Pin [" .. wpData.name .. "] dihapus."
+	end)
+
+	table.insert(waypoints, wpData)
+	updateWaypointCanvasSize()
+	statusLabel.Text = string.format("Pin [%s] ditambahkan! (Total: %d)", customName, #waypoints)
+end
+
+-- ==========================================
+-- 7. LOGIKA DETEKSI BENDA & KARAKTER PLAYER
+-- ==========================================
+local function getPlayerFromInstance(inst)
+	if not inst then return nil end
+	local current = inst
+	while current and current ~= workspace do
+		if current:IsA("Model") then
+			local plr = Players:GetPlayerFromCharacter(current)
+			if plr then return plr, current end
+		end
+		current = current.Parent
+	end
+	return nil, nil
+end
+
+local function extractCleanKeyword(rawName)
+	local cleaned = rawName:gsub("[_%-%s]*%d+[_%-%d]*$", "")
+	if #cleaned < 2 then
+		cleaned = rawName
+	end
+	return cleaned
+end
+
+local function resolveClickedObject(hitPart)
+	if not hitPart then return nil, nil end
+
+	local hitPlayer, charModel = getPlayerFromInstance(hitPart)
+	if hitPlayer then
+		if hitPlayer == LocalPlayer then return nil, nil end
+		return charModel, hitPlayer
+	end
+
+	local candidate = hitPart
+	local current = hitPart
+
+	while current.Parent and current.Parent ~= workspace do
+		local parent = current.Parent
+		if parent:IsA("Model") then
+			local ok, _, boxSize = pcall(function()
+				return parent:GetBoundingBox()
+			end)
+			if ok and boxSize.Magnitude <= 38 then
+				candidate = parent
+				current = parent
+			else
+				break
+			end
+		else
+			break
+		end
+	end
+
+	return candidate, nil
+end
+
+local function getTargetPart(obj)
+	if obj:IsA("BasePart") then
+		return obj
+	elseif obj:IsA("Model") then
+		return obj:FindFirstChild("HumanoidRootPart") or obj.PrimaryPart or obj:FindFirstChildWhichIsA("BasePart", true)
+	end
+	return nil
+end
+
+local function removeESP(obj)
+	local data = trackedObjects[obj]
+	if data then
+		if data.highlight then data.highlight:Destroy() end
+		if data.billboard then data.billboard:Destroy() end
+		if data.lineFrame then data.lineFrame:Destroy() end
+		trackedObjects[obj] = nil
+	end
+end
+
+local function clearAllESP()
+	for obj, _ in pairs(trackedObjects) do
+		removeESP(obj)
+	end
+	table.clear(trackedObjects)
+end
+
+local function isMatchingTarget(obj)
+	if not obj or obj == workspace or obj:IsDescendantOf(waypointFolder) then return false end
+	if not (obj:IsA("Model") or obj:IsA("BasePart")) then return false end
+	if LocalPlayer.Character and (obj == LocalPlayer.Character or obj:IsDescendantOf(LocalPlayer.Character)) then
+		return false
+	end
+
+	if obj.Parent and trackedObjects[obj.Parent] then
+		return false
+	end
+
+	if targetMatchMode == "Player" then
+		local plr = Players:GetPlayerFromCharacter(obj)
+		if plr and plr ~= LocalPlayer then
+			if targetKeyword == "AllPlayers" or plr.Name:lower():find(targetKeyword:lower(), 1, true) or plr.DisplayName:lower():find(targetKeyword:lower(), 1, true) then
+				return true
+			end
+		end
+		return false
+
+	elseif targetMatchMode == "Name" then
+		if #targetKeyword == 0 then return false end
+		local lowerName = obj.Name:lower()
+		local lowerKey = targetKeyword:lower()
+
+		local plr = Players:GetPlayerFromCharacter(obj)
+		if plr and plr ~= LocalPlayer then
+			if lowerName:find(lowerKey, 1, true) or plr.DisplayName:lower():find(lowerKey, 1, true) then
+				return true
+			end
+		end
+
+		if string.find(lowerName, lowerKey, 1, true) then
+			if obj:IsA("Model") and not plr then
+				local ok, _, boxSize = pcall(function() return obj:GetBoundingBox() end)
+				if ok and boxSize.Magnitude > 45 then
+					return false
+				end
+			end
+			if obj.Parent and obj.Parent ~= workspace and string.find(obj.Parent.Name:lower(), lowerKey, 1, true) then
+				return false
+			end
+			return true
+		end
+
+	elseif targetMatchMode == "MeshId" and targetMeshId then
+		if obj:IsA("MeshPart") and obj.MeshId == targetMeshId then
+			return true
+		end
+
+	elseif targetMatchMode == "Size" and targetRefSize then
+		if obj:IsA("BasePart") and (obj.Size - targetRefSize).Magnitude <= 0.25 then
+			return true
+		end
+	end
+
+	return false
+end
+
+local function addESP(obj)
+	if trackedObjects[obj] then return end
+	local targetPart = getTargetPart(obj)
+	if not targetPart then return end
+
+	local plr = Players:GetPlayerFromCharacter(obj)
+	if plr then
+		lastEspPlayer = plr
+	end
+
+	local highlight = Instance.new("Highlight")
+	highlight.Name = "UniversalESPHighlight"
+	highlight.Adornee = obj
+	highlight.FillColor = plr and Color3.fromRGB(255, 65, 65) or Color3.fromRGB(255, 130, 0)
+	highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
+	highlight.FillTransparency = 0.4
+	highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+	highlight.Enabled = espEnabled
+	highlight.Parent = obj
+
+	local billboard = Instance.new("BillboardGui")
+	billboard.Name = "UniversalESPBillboard"
+	billboard.Adornee = targetPart
+	billboard.Size = UDim2.fromOffset(150, 34)
+	billboard.StudsOffset = Vector3.new(0, 3, 0)
+	billboard.AlwaysOnTop = true
+	billboard.Enabled = espEnabled
+	billboard.Parent = obj
+
+	local textLabel = Instance.new("TextLabel")
+	textLabel.Size = UDim2.fromScale(1, 1)
+	textLabel.BackgroundTransparency = 1
+	textLabel.Text = "🎯 " .. (plr and plr.DisplayName or targetKeyword)
+	textLabel.TextColor3 = plr and Color3.fromRGB(255, 110, 110) or Color3.fromRGB(255, 185, 50)
+	textLabel.TextStrokeTransparency = 0
+	textLabel.Font = Enum.Font.GothamBold
+	textLabel.TextSize = 12
+	textLabel.Parent = billboard
+
+	local lineFrame = Instance.new("Frame")
+	lineFrame.Name = "TracerLine"
+	lineFrame.AnchorPoint = Vector2.new(0.5, 0.5)
+	lineFrame.BackgroundColor3 = plr and Color3.fromRGB(255, 75, 75) or Color3.fromRGB(255, 140, 0)
+	lineFrame.BorderSizePixel = 0
+	lineFrame.Visible = false
+	lineFrame.Parent = lineContainer
+
+	trackedObjects[obj] = {
+		highlight = highlight,
+		billboard = billboard,
+		textLabel = textLabel,
+		lineFrame = lineFrame,
+		targetPart = targetPart,
+		player = plr
+	}
+end
+
+local function checkObject(obj)
+	if isMatchingTarget(obj) then
+		task.defer(function()
+			if isMatchingTarget(obj) then
+				addESP(obj)
+			end
+		end)
+	end
+end
+
+local function rescanWorkspace()
+	clearAllESP()
+	for _, obj in ipairs(workspace:GetDescendants()) do
+		checkObject(obj)
+	end
+end
+
+rescanWorkspace()
+
+table.insert(connections, workspace.DescendantAdded:Connect(checkObject))
+table.insert(connections, workspace.DescendantRemoving:Connect(function(obj)
+	if trackedObjects[obj] then
+		removeESP(obj)
+	end
+end))
+
+-- ==========================================
+-- 8. SISTEM KLIK BENDA / PLAYER DI LAYAR
+-- ==========================================
+local function getMouseWorldTarget()
+	local mousePos = UserInputService:GetMouseLocation()
+	local unitRay = Camera:ViewportPointToRay(mousePos.X, mousePos.Y)
+	local rayParams = RaycastParams.new()
+	rayParams.FilterType = Enum.RaycastFilterType.Exclude
+
+	local ignoreList = {waypointFolder}
+	if LocalPlayer.Character then table.insert(ignoreList, LocalPlayer.Character) end
+	rayParams.FilterDescendantsInstances = ignoreList
+
+	local result = workspace:Raycast(unitRay.Origin, unitRay.Direction * 1000, rayParams)
+	if result and result.Instance then
+		local resolvedObj, hitPlayer = resolveClickedObject(result.Instance)
+		return resolvedObj, result.Instance, hitPlayer
+	end
+	return nil, nil, nil
+end
+
+local function stopPickMode()
+	isPickingTarget = false
+	hoverHighlight.Enabled = false
+	hoverHighlight.Adornee = nil
+	pickTargetBtn.Text = "🎯 Set Target (Klik Benda / Player)"
+	pickTargetBtn.BackgroundColor3 = Color3.fromRGB(210, 120, 20)
+end
+
+pickTargetBtn.MouseButton1Click:Connect(function()
+	isPickingTarget = not isPickingTarget
+	if isPickingTarget then
+		pickTargetBtn.Text = "🎯 Klik Benda / Player... (Batal: Klik Lagi)"
+		pickTargetBtn.BackgroundColor3 = Color3.fromRGB(0, 160, 215)
+	else
+		stopPickMode()
+	end
+end)
+
+table.insert(connections, UserInputService.InputBegan:Connect(function(input, gameProcessed)
+	if not isPickingTarget then return end
+	if input.KeyCode == Enum.KeyCode.Escape then
+		stopPickMode()
+		return
+	end
+	if gameProcessed then return end
+
+	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+		local resolvedObj, rawPart, hitPlayer = getMouseWorldTarget()
+		if resolvedObj then
+			if hitPlayer then
+				targetMatchMode = "Player"
+				targetKeyword = hitPlayer.Name
+				selectedPlayer = hitPlayer
+				lastEspPlayer = hitPlayer
+				dropdownBtn.Text = "Target: " .. hitPlayer.DisplayName .. " ▼"
+				statusLabel.Text = "Target Player: @" .. hitPlayer.Name .. " (Siap Pin/Spectate)"
+			else
+				local rawNameLower = resolvedObj.Name:lower()
+				if genericPartNames[rawNameLower] then
+					if rawPart and rawPart:IsA("MeshPart") and rawPart.MeshId ~= "" then
+						targetMatchMode = "MeshId"
+						targetMeshId = rawPart.MeshId
+						targetKeyword = resolvedObj.Name .. " (Mesh)"
+					else
+						targetMatchMode = "Size"
+						targetRefSize = rawPart and rawPart.Size or Vector3.new(1, 1, 1)
+						targetKeyword = resolvedObj.Name .. " (Ukuran)"
+					end
+				else
+					targetMatchMode = "Name"
+					targetKeyword = extractCleanKeyword(resolvedObj.Name)
+				end
+			end
+
+			targetNameInput.Text = targetKeyword
+			stopPickMode()
+			rescanWorkspace()
+		end
+	end
+end))
+
+table.insert(connections, targetNameInput.FocusLost:Connect(function()
+	local text = targetNameInput.Text:gsub("^%s*(.-)%s*$", "%1")
+	if #text > 0 then
+		targetMatchMode = "Name"
+		targetKeyword = text
+		rescanWorkspace()
+	else
+		targetNameInput.Text = targetKeyword
+	end
+end))
+
+-- ==========================================
+-- 9. TOMBOL TAMBAH PIN KOORDINAT (TARGET, DIRI SENDIRI, MANUAL)
+-- ==========================================
+-- A. Tambah Pin dari posisi Target Player / Benda ESP
+addTargetPinBtn.MouseButton1Click:Connect(function()
+	local targetPlr = selectedPlayer or lastEspPlayer
+	if not targetPlr then
+		for _, data in pairs(trackedObjects) do
+			if data.player then
+				targetPlr = data.player
+				break
+			end
+		end
+	end
+
+	if targetPlr and targetPlr.Character then
+		local hrp = getTargetPart(targetPlr.Character)
+		if hrp then
+			addWaypointPin(hrp.Position, "@" .. targetPlr.DisplayName)
+			return
+		end
+	end
+
+	-- Fallback ke benda ESP terdekat jika belum memilih player
+	local closestPos = nil
+	local closestDist = math.huge
+	for _, data in pairs(trackedObjects) do
+		if data.targetPart and data.targetPart.Parent then
+			local d = (Camera.CFrame.Position - data.targetPart.Position).Magnitude
+			if d < closestDist then
+				closestDist = d
+				closestPos = data.targetPart.Position
+			end
+		end
+	end
+
+	if closestPos then
+		addWaypointPin(closestPos, targetKeyword .. " #" .. tostring(waypointCounter + 1))
+	else
+		statusLabel.Text = "Pilih player atau ESP benda dulu untuk di-pin!"
+	end
+end)
+
+-- B. Tambah Pin dari Posisi Karakter Sendiri / Kamera Saat Ini
+addSelfPinBtn.MouseButton1Click:Connect(function()
+	local myChar = LocalPlayer.Character
+	local myHrp = myChar and getTargetPart(myChar)
+	local pos = myHrp and myHrp.Position or Camera.CFrame.Position
+	addWaypointPin(pos, "Spot #" .. tostring(waypointCounter + 1))
+end)
+
+-- C. Tambah Pin dari Input Koordinat Manual "X, Y, Z"
+local function tryAddManualCoord()
+	local x, y, z = string.match(coordInput.Text, "([%-%d%.]+)[,%s]+([%-%d%.]+)[,%s]+([%-%d%.]+)")
+	if x and y and z then
+		local vec = Vector3.new(tonumber(x), tonumber(y), tonumber(z))
+		addWaypointPin(vec, "Custom #" .. tostring(waypointCounter + 1))
+	else
+		statusLabel.Text = "Format koordinat salah! Gunakan: X, Y, Z"
+	end
+end
+
+addManualPinBtn.MouseButton1Click:Connect(tryAddManualCoord)
+table.insert(connections, coordInput.FocusLost:Connect(function(enterPressed)
+	if enterPressed then
+		tryAddManualCoord()
+	end
+end))
+
+toggleCoordEspBtn.MouseButton1Click:Connect(function()
+	coordEspEnabled = not coordEspEnabled
+	toggleCoordEspBtn.Text = coordEspEnabled and "Pin ESP: ON" or "Pin ESP: OFF"
+	toggleCoordEspBtn.BackgroundColor3 = coordEspEnabled and Color3.fromRGB(35, 140, 140) or Color3.fromRGB(70, 70, 85)
+end)
+
+clearAllPinsBtn.MouseButton1Click:Connect(function()
+	clearAllWaypoints()
+	statusLabel.Text = "Semua Pin Koordinat telah dihapus."
+end)
+
+-- ==========================================
+-- 10. LOGIKA KAMERA SPECTATE & RENDER LOOP
+-- ==========================================
+local function setCharacterLocalTransparency(char, val)
+	if not char then return end
+	for _, part in ipairs(char:GetDescendants()) do
+		if part:IsA("BasePart") then
+			part.LocalTransparencyModifier = val
+		end
+	end
+end
+
+local function resetToOwnCamera()
+	if selectedPlayer and selectedPlayer.Character then
+		setCharacterLocalTransparency(selectedPlayer.Character, 0)
+	end
+	Camera.CameraType = Enum.CameraType.Custom
+	local myChar = LocalPlayer.Character
+	local myHum = myChar and myChar:FindFirstChildOfClass("Humanoid")
+	if myHum then
+		Camera.CameraSubject = myHum
+	end
+end
+
+local function updateSpectateStatus()
+	if isSpectating and selectedPlayer and selectedPlayer.Parent == Players then
+		spectateBtn.Text = "Spectate: ON"
+		spectateBtn.BackgroundColor3 = Color3.fromRGB(200, 55, 55)
+		statusLabel.Text = "Mengamati: " .. selectedPlayer.DisplayName .. " (@" .. selectedPlayer.Name .. ")"
+		if currentCamMode == 1 then
+			setCharacterLocalTransparency(selectedPlayer.Character, 0)
+			Camera.CameraType = Enum.CameraType.Custom
+			local hum = selectedPlayer.Character and selectedPlayer.Character:FindFirstChildOfClass("Humanoid")
+			if hum then Camera.CameraSubject = hum end
+		end
+	else
+		isSpectating = false
+		resetToOwnCamera()
+		spectateBtn.Text = "Spectate: OFF (Normal)"
+		spectateBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 75)
+		if selectedPlayer then
+			statusLabel.Text = "Target Aktif: @" .. selectedPlayer.Name .. " (Siap)"
+		else
+			statusLabel.Text = "Status: Normal"
+		end
+	end
+end
+
+-- Loop RenderStepped Utama
+table.insert(connections, RunService.RenderStepped:Connect(function()
+	-- A. Hover Preview saat Mode Pick Target
+	if isPickingTarget then
+		local hoveredObj, _, hoveredPlr = getMouseWorldTarget()
+		if hoveredObj then
+			hoverHighlight.Adornee = hoveredObj
+			hoverHighlight.Enabled = true
+			if hoveredPlr then
+				pickTargetBtn.Text = "🎯 Klik Player: [@" .. hoveredPlr.Name .. "]"
+			else
+				pickTargetBtn.Text = "🎯 Klik Benda: [" .. extractCleanKeyword(hoveredObj.Name) .. "]"
+			end
+		else
+			hoverHighlight.Enabled = false
+			hoverHighlight.Adornee = nil
+			pickTargetBtn.Text = "🎯 Arahkan ke Benda / Player..."
+		end
+	end
+
+	-- B. Update Kamera Spectate
+	if isSpectating and selectedPlayer and selectedPlayer.Character then
+		local char = selectedPlayer.Character
+		local head = char:FindFirstChild("Head")
+		local hrp = char:FindFirstChild("HumanoidRootPart")
+
+		if currentCamMode == 2 and head then
+			Camera.CameraType = Enum.CameraType.Scriptable
+			setCharacterLocalTransparency(char, 1)
+			Camera.CFrame = Camera.CFrame:Lerp(head.CFrame * CFrame.new(0, 0, -0.4), 0.35)
+		elseif currentCamMode == 3 and hrp then
+			Camera.CameraType = Enum.CameraType.Scriptable
+			setCharacterLocalTransparency(char, 0)
+			local lookCFrame = head and head.CFrame or hrp.CFrame
+			local targetCFrame = CFrame.new(hrp.Position) * lookCFrame.Rotation * CFrame.new(0, 3, 8)
+			Camera.CFrame = Camera.CFrame:Lerp(targetCFrame, 0.2)
+		end
+	end
+
+	local viewportSize = Camera.ViewportSize
+	local startPos = Vector2.new(viewportSize.X / 2, viewportSize.Y)
+
+	-- C. Update Semua Pin Koordinat (Multi-Waypoints)
+	for _, wp in ipairs(waypoints) do
+		local showThisPin = coordEspEnabled and wp.visible
+		local distToPin = (Camera.CFrame.Position - wp.position).Magnitude
+		local dirText, dirArrow = getRelativeDirectionInfo(wp.position)
+
+		-- Update info arah & jarak di dalam daftar GUI
+		wp.rowDirLabel.Text = string.format("%s [%dm]", dirText, math.floor(distToPin))
+
+		if wp.markerPart then
+			wp.markerPart.Transparency = showThisPin and 0.35 or 1
+		end
+		if wp.highlight then
+			wp.highlight.Enabled = showThisPin
+		end
+		if wp.billboard then
+			wp.billboard.Enabled = showThisPin
+		end
+
+		if showThisPin then
+			if wp.textLabel then
+				wp.textLabel.Text = string.format("📍 %s %s [%d m]\n(%d, %d, %d)", wp.name, dirArrow, math.floor(distToPin), math.floor(wp.position.X), math.floor(wp.position.Y), math.floor(wp.position.Z))
+			end
+
+			local screenPos, onScreen = Camera:WorldToViewportPoint(wp.position)
+			if onScreen and screenPos.Z > 0 then
+				local endPos = Vector2.new(screenPos.X, screenPos.Y)
+				local midPoint = (startPos + endPos) / 2
+				local length = (endPos - startPos).Magnitude
+				local angle = math.deg(math.atan2(endPos.Y - startPos.Y, endPos.X - startPos.X))
+
+				wp.lineFrame.Position = UDim2.fromOffset(midPoint.X, midPoint.Y)
+				wp.lineFrame.Size = UDim2.fromOffset(length, 2)
+				wp.lineFrame.Rotation = angle
+				wp.lineFrame.Visible = true
+			else
+				wp.lineFrame.Visible = false
+			end
+		else
+			if wp.lineFrame then
+				wp.lineFrame.Visible = false
+			end
+		end
+	end
+
+	-- D. Update ESP Benda / Player & Filter Jarak
+	local totalCount = 0
+	local visibleCount = 0
+
+	for obj, data in pairs(trackedObjects) do
+		if not obj or not obj.Parent or not data.targetPart or not data.targetPart.Parent then
+			removeESP(obj)
+			continue
+		end
+
+		totalCount += 1
+		local worldPos = data.targetPart.Position
+		local dist = (Camera.CFrame.Position - worldPos).Magnitude
+		local inRange = (dist <= maxEspDistance)
+
+		if inRange then
+			visibleCount += 1
+		end
+
+		local showBox = espEnabled and inRange
+		data.highlight.Enabled = showBox
+		data.billboard.Enabled = showBox
+
+		if showBox then
+			if data.player then
+				data.textLabel.Text = string.format("👤 %s [%d m]\n(%d, %d, %d)", data.player.DisplayName, math.floor(dist), math.floor(worldPos.X), math.floor(worldPos.Y), math.floor(worldPos.Z))
+			else
+				data.textLabel.Text = string.format("🎯 %s [%d m]", targetKeyword, math.floor(dist))
+			end
+		end
+
+		if lineEnabled and inRange then
+			local screenPos, onScreen = Camera:WorldToViewportPoint(worldPos)
+			if onScreen and screenPos.Z > 0 then
+				local endPos = Vector2.new(screenPos.X, screenPos.Y)
+				local midPoint = (startPos + endPos) / 2
+				local length = (endPos - startPos).Magnitude
+				local angle = math.deg(math.atan2(endPos.Y - startPos.Y, endPos.X - startPos.X))
+
+				data.lineFrame.Position = UDim2.fromOffset(midPoint.X, midPoint.Y)
+				data.lineFrame.Size = UDim2.fromOffset(length, 1.5)
+				data.lineFrame.Rotation = angle
+				data.lineFrame.Visible = true
+			else
+				data.lineFrame.Visible = false
+			end
+		else
+			data.lineFrame.Visible = false
+		end
+	end
+
+	countLabel.Text = string.format("Terdeteksi (%s): %d Terlihat / %d Total", targetKeyword, visibleCount, totalCount)
+end))
+
+-- ==========================================
+-- 11. DROPDOWN & INTERAKSI TOMBOL
+-- ==========================================
+local function refreshDropdown()
+	for _, child in ipairs(dropdownList:GetChildren()) do
+		if child:IsA("TextButton") then
+			child:Destroy()
+		end
+	end
+
+	local otherPlayers = {}
+	for _, plr in ipairs(Players:GetPlayers()) do
+		if plr ~= LocalPlayer then
+			table.insert(otherPlayers, plr)
+		end
+	end
+
+	if #otherPlayers == 0 then
+		local emptyBtn = Instance.new("TextButton")
+		emptyBtn.Size = UDim2.new(1, 0, 0, 28)
+		emptyBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
+		emptyBtn.Text = "Tidak ada player lain di server"
+		emptyBtn.TextColor3 = Color3.fromRGB(160, 160, 160)
+		emptyBtn.Font = Enum.Font.Gotham
+		emptyBtn.TextSize = 11
+		emptyBtn.ZIndex = 11
+		emptyBtn.Parent = dropdownList
+		dropdownList.CanvasSize = UDim2.fromOffset(0, 30)
+		return
+	end
+
+	for _, plr in ipairs(otherPlayers) do
+		local itemBtn = Instance.new("TextButton")
+		itemBtn.Size = UDim2.new(1, 0, 0, 28)
+		itemBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 60)
+		itemBtn.Text = "  " .. plr.DisplayName .. " (@" .. plr.Name .. ")"
+		itemBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+		itemBtn.Font = Enum.Font.GothamSemibold
+		itemBtn.TextSize = 11
+		itemBtn.TextXAlignment = Enum.TextXAlignment.Left
+		itemBtn.TextTruncate = Enum.TextTruncate.AtEnd
+		itemBtn.ZIndex = 11
+		itemBtn.Parent = dropdownList
+
+		itemBtn.MouseButton1Click:Connect(function()
+			if selectedPlayer and selectedPlayer.Character then
+				setCharacterLocalTransparency(selectedPlayer.Character, 0)
+			end
+			selectedPlayer = plr
+			lastEspPlayer = plr
+			dropdownBtn.Text = "Target: " .. plr.DisplayName .. " ▼"
+			dropdownList.Visible = false
+			isSpectating = true
+			updateSpectateStatus()
+		end)
+	end
+
+	dropdownList.CanvasSize = UDim2.fromOffset(0, #otherPlayers * 30)
+end
+
+espBtn.MouseButton1Click:Connect(function()
+	espEnabled = not espEnabled
+	espBtn.Text = espEnabled and "ESP Box: ON" or "ESP Box: OFF"
+	espBtn.BackgroundColor3 = espEnabled and Color3.fromRGB(40, 150, 80) or Color3.fromRGB(70, 70, 85)
+end)
+
+lineBtn.MouseButton1Click:Connect(function()
+	lineEnabled = not lineEnabled
+	lineBtn.Text = lineEnabled and "ESP Line: ON" or "ESP Line: OFF"
+	lineBtn.BackgroundColor3 = lineEnabled and Color3.fromRGB(40, 150, 80) or Color3.fromRGB(70, 70, 85)
+end)
+
+dropdownBtn.MouseButton1Click:Connect(function()
+	dropdownList.Visible = not dropdownList.Visible
+	if dropdownList.Visible then
+		refreshDropdown()
+	end
+end)
+
+camModeBtn.MouseButton1Click:Connect(function()
+	currentCamMode += 1
+	if currentCamMode > #camModes then
+		currentCamMode = 1
+	end
+	camModeBtn.Text = "Cam Mode: " .. camModes[currentCamMode]
+	if isSpectating then
+		updateSpectateStatus()
+	end
+end)
+
+spectateBtn.MouseButton1Click:Connect(function()
+	if not selectedPlayer then
+		statusLabel.Text = "Pilih player di dropdown atau klik tubuhnya dulu!"
+		return
+	end
+	isSpectating = not isSpectating
+	updateSpectateStatus()
+end)
+
+table.insert(connections, Players.PlayerRemoving:Connect(function(plr)
+	if plr == selectedPlayer then
+		selectedPlayer = nil
+		dropdownBtn.Text = "Pilih Player (Dropdown) ▼"
+		isSpectating = false
+		updateSpectateStatus()
+	end
+	if dropdownList.Visible then
+		refreshDropdown()
+	end
+end))
+
+table.insert(connections, Players.PlayerAdded:Connect(function()
+	if dropdownList.Visible then
+		refreshDropdown()
+	end
+end))
+
+-- ==========================================
+-- 12. FUNGSI CLOSE TOTAL [X]
+-- ==========================================
+closeBtn.MouseButton1Click:Connect(function()
+	for _, conn in ipairs(connections) do
+		if conn.Connected then
+			conn:Disconnect()
+		end
+	end
+	table.clear(connections)
+
+	clearAllESP()
+	clearAllWaypoints()
+	if waypointFolder then waypointFolder:Destroy() end
+	isSpectating = false
+	resetToOwnCamera()
+	screenGui:Destroy()
+end)
